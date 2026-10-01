@@ -137,6 +137,22 @@ jobs:
                   ;;
                 ERRORED|CANCELED)
                   echo "::error::EAS build ${BUILD_ID} ended with status ${status}"
+                  node -e "
+                    const fs = require('fs');
+                    let b = {};
+                    try { b = JSON.parse(fs.readFileSync('view.json', 'utf8')); } catch {}
+                    if (b.error) {
+                      console.log('errorCode: ' + (b.error.errorCode ?? 'n/a'));
+                      console.log('error: ' + (b.error.message ?? 'n/a'));
+                      console.log('docs: ' + (b.error.docsUrl ?? 'n/a'));
+                    }
+                    if (Array.isArray(b.logFiles) && b.logFiles.length) {
+                      console.log('logFiles: ' + JSON.stringify(b.logFiles));
+                    }
+                    if (b.app?.slug) {
+                      console.log('app: @' + (b.app.ownerAccount?.name ?? '?') + '/' + b.app.slug);
+                    }
+                  "
                   exit 1
                   ;;
               esac
