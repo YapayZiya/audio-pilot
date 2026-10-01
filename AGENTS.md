@@ -212,12 +212,21 @@ npx expo run:ios      # iOS
   2. Setup Node.js 22 with npm cache
   3. `npm ci` (lockfile is committed and must stay in sync with package.json)
   4. `npx expo config --type public` (fail fast if the Expo config is invalid)
-  5. `npx eas-cli build --platform android --profile preview --non-interactive`
+  5. `eas init` (links or creates the EAS project; see below)
+  6. Assert `extra.eas.projectId` is now present
+  7. `npx eas-cli build --platform android --profile preview --non-interactive --wait --json`
+  8. Download the resulting APK and publish it as a workflow artifact
 - **Required Secret**: `EXPO_TOKEN`
+- **Optional Secrets/Vars**:
+  - `EAS_PROJECT_ID`: link an existing project instead of creating one
+  - `EAS_ACCOUNT` (repository variable): Expo account that owns the project,
+    defaults to `yapayziya`
 - **Note**: the deprecated `expo/expo-github-action` is NOT used. It installs the
   legacy, end-of-life `expo-cli`, which cannot evaluate an SDK 57 project config
   (it fails with `expo config ... exited with non-zero code` or
   `Unexpected token 'typeof'`). EAS CLI alone is sufficient.
+- **Note**: `--wait` is required, otherwise the job turns green as soon as the
+  project is uploaded and never learns whether the APK actually compiled.
 
 ### EAS Build Profiles (`eas.json`)
 - `preview`: APK, internal distribution
@@ -239,6 +248,15 @@ a hard failure before the build is uploaded.
 handles them), and `expo-av` no longer exists in SDK 57 (use `expo-audio`).
 **Solution**: `plugins` only lists `expo-location`, `expo-audio`, `expo-task-manager`,
 `expo-background-fetch` and `expo-splash-screen`.
+
+### EAS Project Not Configured
+**Issue**: `EAS project not configured. This command cannot configure it in
+non-interactive mode.`
+**Root Cause**: `app.json` has no `extra.eas.projectId`, and `eas build
+--non-interactive` refuses to create/link a project on its own.
+**Solution**: run `eas init` before the build. Once the project exists, copy its id
+into `app.json` as `expo.extra.eas.projectId` (plus `expo.owner`) and commit it so
+CI becomes fully declarative.
 
 ### Version Matrix Drift (root cause of past build failures)
 **Issue**: Builds fail right after `npm install` even though install succeeds.

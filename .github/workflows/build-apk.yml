@@ -9,6 +9,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Expo account that owns the EAS project. Override with the EAS_ACCOUNT secret.
+  EXPO_ACCOUNT: ${{ vars.EAS_ACCOUNT || 'yapayziya' }}
+
 jobs:
   build:
     name: Build APK (EAS)
@@ -30,7 +34,74 @@ jobs:
       - name: Verify Expo project config
         run: npx expo config --type public > /dev/null
 
-      - name: Build APK with EAS
-        run: npx eas-cli build --platform android --profile preview --non-interactive
+      # EAS needs the project to be linked before a non-interactive build.
+      # If EAS_PROJECT_ID is set as a repository secret the existing project is
+      # linked, otherwise a project is created under EXPO_ACCOUNT.
+      - name: Ensure EAS project is linked
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_PROJECT_ID: ${{ secrets.EAS_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if node -e "process.exit(require('./app.json').expo?.extra?.eas?.projectId ? 0 : 1)"; then
+            echo "Project is already linked via app.json (extra.eas.projectId)."
+          elif [ -n "${EAS_PROJECT_ID:-}" ]; then
+            npx eas-cli init --id "$EAS_PROJECT_ID" --non-interactive
+          else
+            npx eas-cli init --account "$EXPO_ACCOUNT" --non-interactive
+          fi
+
+      - name: Verify project is linked
+        run: |
+          set -euo pipefail
+          node -e "
+            const id = require('./app.json').expo?.extra?.eas?.projectId;
+            if (!id) {
+              console.error('extra.eas.projectId is still missing after eas init.');
+              console.error('Check that EXPO_TOKEN is a valid Expo access token and that');
+              console.error('the account in EXPO_ACCOUNT can create projects.');
+              process.exit(1);
+            }
+            console.log('EAS project id: ' + id);
+          "
+
+      - name: Build APK with EAS
+        run: npx eas-cli build --platform android --profile preview --non-interactive --wait --json > eas-build-result.json
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Report EAS build result
+        if: always()
+        run: |
+          node -e "
+            const fs = require('fs');
+            let text = '';
+            try { text = fs.readFileSync('eas-build-result.json', 'utf8').trim(); } catch {}
+            if (!text) { console.log('EAS produced no JSON output.'); process.exit(0); }
+            let parsed;
+            try { parsed = JSON.parse(text); } catch { console.log('EAS output was not JSON.'); process.exit(0); }
+            for (const b of (Array.isArray(parsed) ? parsed : [parsed])) {
+              if (!b || typeof b !== 'object') continue;
+              console.log('status:    ' + (b.status ?? 'unknown'));
+              console.log('dashboard: ' + (b.links?.build?.webUrl ?? 'n/a'));
+              const apk = b.artifacts?.buildUrl;
+              console.log('apk:       ' + (apk ?? 'n/a'));
+              if (apk) fs.writeFileSync('apk-url.txt', apk);
+            }
+          "
+
+      - name: Download APK
+        if: hashFiles('apk-url.txt') != ''
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          curl -sSL --retry 3 -o audiopilot-preview.apk "$(cat apk-url.txt)"
+          ls -lh audiopilot-preview.apk
+
+      - name: Upload APK to workflow artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audiopilot-preview-apk
+          path: audiopilot-preview.apk
+          if-no-files-found: warn
