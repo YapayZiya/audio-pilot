@@ -45,6 +45,9 @@
       "expo-haptics",
       "expo-task-manager",
       "expo-background-fetch"
-    ]
+    ],
+    "cli": {
+      "appVersionSource": "remote"
+    }
   }
 }
