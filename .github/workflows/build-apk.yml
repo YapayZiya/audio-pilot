@@ -86,6 +86,35 @@ jobs:
             echo "action=submit" >> "$GITHUB_OUTPUT"
           fi
 
+      # A new commit makes every previously queued build obsolete, and the
+      # limited number of build slots on the Expo plan is shared across them.
+      # Cancelling the superseded builds first keeps the current commit moving.
+      - name: Cancel superseded queued builds
+        if: steps.mode.outputs.action == 'submit'
+        continue-on-error: true
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          npx eas-cli build:list --json --non-interactive --limit 20 > queued.json 2>/dev/null || exit 0
+          ids=$(node -e "
+            const fs = require('fs');
+            let parsed;
+            try { parsed = JSON.parse(fs.readFileSync('queued.json', 'utf8')); } catch { process.exit(0); }
+            const builds = Array.isArray(parsed) ? parsed : (parsed?.builds ?? []);
+            const pending = new Set(['NEW', 'IN_QUEUE', 'IN_PROGRESS', 'PENDING_CANCEL']);
+            const sha = process.env.COMMIT_SHA;
+            const stale = builds.filter((b) => {
+              const status = String(b?.status ?? '').toUpperCase().replace(/-/g, '_');
+              return b && b.id && pending.has(status) && b.gitCommitHash !== sha;
+            });
+            process.stdout.write(stale.map((b) => b.id).join(' '));
+          ")
+          for id in $ids; do
+            echo "Cancelling superseded build $id"
+            npx eas-cli build:cancel "$id" --non-interactive || true
+          done
+
       # EAS builds run on Expo's servers and a free-tier queue can take a long
       # time, so the push trigger only submits and reports. The build continues
       # independently of this job.

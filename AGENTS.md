@@ -227,6 +227,12 @@ npx expo run:ios      # iOS
   `Unexpected token 'typeof'`). EAS CLI alone is sufficient.
 - **Note**: `--wait` is required, otherwise the job turns green as soon as the
   project is uploaded and never learns whether the APK actually compiled.
+- **Note**: the submit path first cancels queued builds that belong to older
+  commits. Every push submits a build and the Expo plan only allows a limited
+  number of concurrent builds, so without this a burst of pushes leaves several
+  obsolete builds competing for slots and the newest commit waits behind them.
+  The step only touches non-terminal builds whose `gitCommitHash` differs from
+  the commit being built, and it is `continue-on-error`.
 
 ### EAS Build Profiles (`eas.json`)
 - `preview`: APK, internal distribution
