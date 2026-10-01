@@ -283,10 +283,24 @@ directories, so CI checkouts had no images at all.
 **Solution**: Ensure `interruptionMode: 'duckOthers'` and `shouldPlayInBackground: true` are set via `setAudioModeAsync` from `expo-audio`.
 
 ## Testing
-- Unit tests for CurvatureService (bearing, distance, curvature calculations)
-- Integration tests for LocationService callbacks
-- UI tests for DriveScreen and MinimalCockpit
-- Manual testing on physical device required for GPS and haptics
+- **Runner**: Jest via the `jest-expo` preset (pinned to the SDK). `npm test` runs the suite.
+- **Unit tests (done)**: `src/services/__tests__/curvatureService.test.ts` covers
+  `calculateBearing`, `haversineDistance`, `normalizeBearingDelta`,
+  `calculateCurvatureRadius`, `classifyTurn`, `calculateSafeSpeed` and
+  `findUpcomingTurns`.
+- **Not covered yet**: `OSMService.buildOverpassQuery` / `parseOSMData`,
+  `LocationService` callbacks, and the React Native screens.
+- **Manual testing** on a physical device is still required for GPS, haptics and
+  audio focus, none of which can be covered by unit tests.
+- Tests run in CI (`npm test -- --ci`) before an APK build is submitted.
+
+### Conventions that the tests pin down
+- Compass bearings grow **clockwise** (0 = north, 90 = east). A left turn
+  therefore *decreases* the bearing, a right turn increases it.
+- Bearing differences must be normalised through `normalizeBearingDelta` before
+  any comparison. A turn from 350° to 10° is a raw delta of -340°, not +340°.
+- `findUpcomingTurns` trusts the caller to pass a `currentBearing` consistent
+  with the road geometry; a mismatched heading is reported as a turn.
 
 ## Future Improvements
 - [ ] Implement actual map matching algorithm

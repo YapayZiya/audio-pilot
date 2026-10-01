@@ -1,6 +1,20 @@
 import { Turn, RoadSegment, TURN_DETECTION_THRESHOLD, CURVATURE_RADIUS_SHARP, CURVATURE_RADIUS_GENTLE, LOOKAHEAD_DISTANCE } from '../models/types';
 
 export class CurvatureService {
+  /**
+   * Normalises a difference between two compass bearings into (-180, 180].
+   *
+   * The raw difference of two bearings is meaningless across north: a turn from
+   * 350° to 10° is +20° of leftward rotation, but the raw difference is -340°.
+   * Every bearing comparison must go through this helper first.
+   */
+  static normalizeBearingDelta(delta: number): number {
+    let normalized = delta % 360;
+    if (normalized > 180) normalized -= 360;
+    if (normalized <= -180) normalized += 360;
+    return normalized;
+  }
+
   static calculateBearing(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
@@ -20,8 +34,7 @@ export class CurvatureService {
 
     const bearing1 = p1.bearing;
     const bearing2 = p3.bearing;
-    let angleDiff = Math.abs(bearing2 - bearing1);
-    if (angleDiff > 180) angleDiff = 360 - angleDiff;
+    const angleDiff = Math.abs(this.normalizeBearingDelta(bearing2 - bearing1));
 
     if (angleDiff < 1) return Infinity;
 
@@ -42,9 +55,16 @@ export class CurvatureService {
     return R * c;
   }
 
+  /**
+   * Classifies a turn from its curvature radius and heading change.
+   *
+   * Compass bearings grow clockwise (0 = north, 90 = east), so rotating left
+   * decreases the bearing and rotating right increases it.
+   */
   static classifyTurn(curvatureRadius: number, bearingChange: number): Turn['type'] {
-    const absChange = Math.abs(bearingChange);
-    const isLeft = bearingChange > 0;
+    const normalized = this.normalizeBearingDelta(bearingChange);
+    const absChange = Math.abs(normalized);
+    const isLeft = normalized < 0;
 
     if (curvatureRadius < CURVATURE_RADIUS_SHARP && absChange > TURN_DETECTION_THRESHOLD) {
       return isLeft ? 'sharp_left' : 'sharp_right';
