@@ -18,12 +18,8 @@ jobs:
           node-version: 20
           cache: npm
 
-      - uses: expo/expo-github-action@v8
-        with:
-          token: ${{ secrets.EXPO_TOKEN }}
-          eas-version: latest
-          expo-version: latest
-          packager: npm
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
 
       - name: Install dependencies
         run: npm install
