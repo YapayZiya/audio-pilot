@@ -46,9 +46,6 @@
           "imageWidth": 180
         }
       ]
-    ],
-    "cli": {
-      "appVersionSource": "local"
-    }
+    ]
   }
 }

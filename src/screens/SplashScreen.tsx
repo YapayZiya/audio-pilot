@@ -8,7 +8,7 @@ export const SplashScreen: React.FC<{ onComplete: () => void }> = ({ onComplete 
 
   useEffect(() => {
     const initialize = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), 1500));
 
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -23,7 +23,7 @@ export const SplashScreen: React.FC<{ onComplete: () => void }> = ({ onComplete 
         'high'
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), 5000));
 
       Animated.timing(fadeAnim, {
         toValue: 0,

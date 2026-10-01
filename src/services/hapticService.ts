@@ -42,7 +42,7 @@ export class HapticService {
 
   async triggerGentlePulse(): Promise<void> {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise<void>((resolve) => setTimeout(() => resolve(), 150));
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }
 }
