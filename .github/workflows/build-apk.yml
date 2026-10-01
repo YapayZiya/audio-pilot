@@ -24,6 +24,8 @@ jobs:
           eas-version: latest
           expo-version: latest
           packager: npm
+          expo-cache: false
+          eas-cache: false
 
       - name: Install dependencies
         run: npm install
