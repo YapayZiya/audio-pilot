@@ -18,10 +18,19 @@ jobs:
           node-version: 20
           cache: npm
 
+      - uses: expo/expo-github-action@v8
+        with:
+          token: ${{ secrets.EXPO_TOKEN }}
+          eas-version: latest
+          expo-version: latest
+          packager: npm
+          expo-cache: false
+          eas-cache: false
+
       - name: Install dependencies
         run: npm install
 
       - name: Build APK with EAS
-        run: npx eas build --platform android --profile preview --non-interactive --clear-cache
+        run: eas build --platform android --profile preview --non-interactive --clear-cache
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
