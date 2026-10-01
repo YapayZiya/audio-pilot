@@ -1,5 +1,5 @@
 import * as Speech from 'expo-speech';
-import * as Audio from 'expo-av';
+import { setAudioModeAsync } from 'expo-audio';
 import { Turn, Notification } from '../models/types';
 
 export class AudioService {
@@ -8,12 +8,14 @@ export class AudioService {
 
   async initialize(): Promise<void> {
     try {
-      await Audio.Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: 2, // DuckOthers
-        interruptionModeAndroid: 2, // DuckOthers
-        shouldDuckAndroid: true,
+      // expo-audio replaces expo-av. Ducking is requested through
+      // `interruptionMode` on both platforms (no separate shouldDuckAndroid flag).
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+        interruptionMode: 'duckOthers',
+        allowsRecording: false,
+        shouldRouteThroughEarpiece: false,
       });
 
       console.log('Audio service initialized');
@@ -73,6 +75,8 @@ export class AudioService {
   }
 
   setDuckingLevel(level: number): void {
+    // Kept for API compatibility: expo-audio applies ducking through
+    // `interruptionMode` and does not expose a numeric ducking level.
     this.duckingLevel = Math.max(0.1, Math.min(1.0, level));
   }
 

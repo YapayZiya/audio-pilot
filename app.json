@@ -6,11 +6,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#000000"
-    },
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
@@ -24,7 +19,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#0B0B0F"
       },
       "package": "com.audiopilot.app",
       "permissions": [
@@ -40,11 +35,17 @@
     },
     "plugins": [
       "expo-location",
-      "expo-av",
-      "expo-speech",
-      "expo-haptics",
+      "expo-audio",
       "expo-task-manager",
-      "expo-background-fetch"
+      "expo-background-fetch",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B0B0F",
+          "image": "./assets/splash.png",
+          "imageWidth": 180
+        }
+      ]
     ],
     "cli": {
       "appVersionSource": "local"

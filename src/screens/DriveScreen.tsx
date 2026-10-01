@@ -43,19 +43,6 @@ export const DriveScreen: React.FC = () => {
   const hapticService = new HapticService();
   const locationService = new LocationService();
 
-  useEffect(() => {
-    initializeApp();
-    return () => {
-      locationService.stopTracking();
-      audioService.stop();
-    };
-  }, []);
-
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
-  }, [isHeadDown]);
-
   const handleAppStateChange = (nextAppState: AppStateStatus) => {
     if (nextAppState === 'active' && !isHeadDown) {
       KeepAwake.deactivateKeepAwake();
@@ -182,6 +169,22 @@ export const DriveScreen: React.FC = () => {
   const dismissNotification = useCallback((id: string) => {
     setNotifications((prev) => prev.filter((n) => n.id !== id));
   }, []);
+
+  useEffect(() => {
+    // initializeApp() is async and awaits audio/haptics/location setup before any
+    // setState call, so there is no synchronous state update inside this effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    initializeApp();
+    return () => {
+      locationService.stopTracking();
+      audioService.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [isHeadDown]);
 
   const renderSplashScreen = () => (
     <View style={styles.splashContainer}>

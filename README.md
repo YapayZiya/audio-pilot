@@ -14,10 +14,10 @@ AudioPilot, sürücülerin telefona bakmalarını gerektirmeyen, tamamen sesli v
 - 🚨 **Topluluk Bildirimleri**: Radar ve kaza bildirimleri
 
 ## Teknolojiler
-- **Framework**: React Native (Expo SDK 51)
+- **Framework**: React Native (Expo SDK 57)
 - **Harita**: OpenStreetMap (OSM) Overpass API + react-native-maps
 - **Konum**: expo-location (High Accuracy GPS)
-- **Ses**: expo-speech (TTS) + expo-av (Audio Focus / Ducking)
+- **Ses**: expo-speech (TTS) + expo-audio (Audio Focus / Ducking)
 - **Haptik**: expo-haptics
 - **Depolama**: react-native-mmkv (Offline cache)
 - **CI/CD**: GitHub Actions + EAS Build
@@ -25,9 +25,9 @@ AudioPilot, sürücülerin telefona bakmalarını gerektirmeyen, tamamen sesli v
 ## Kurulum
 
 ### Gereksinimler
-- Node.js 18+
+- Node.js 20+ (CI Node.js 22)
 - npm
-- Expo CLI (`npm install -g expo-cli`)
+- EAS CLI (`npx eas-cli --version`, projeye `eas-cli` devDependency olarak eklenmiştir)
 - Expo hesabı (https://expo.dev)
 
 ### Yerel Geliştirme
@@ -109,7 +109,7 @@ AudioPilot/
 
 ### Audio Focus Yönetimi
 - Medya sesi çalıyorken uyarı anında `%30'a ducking` uygulanır
-- `expo-av` ile `DuckOthers` modu kullanılır
+- `expo-audio` ile `duckOthers` modu kullanılır
 - `expo-speech` ile Türkçe TTS sağlanır
 
 ### Head-Down Modu

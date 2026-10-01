@@ -2,35 +2,35 @@ name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build APK (EAS)
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
-      - uses: expo/expo-github-action@v8
-        with:
-          token: ${{ secrets.EXPO_TOKEN }}
-          eas-version: latest
-          expo-version: latest
-          packager: npm
-          expo-cache: false
-          eas-cache: false
-
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Verify Expo project config
+        run: npx expo config --type public > /dev/null
 
       - name: Build APK with EAS
-        run: eas build --platform android --profile preview --non-interactive --clear-cache
+        run: npx eas-cli build --platform android --profile preview --non-interactive
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}

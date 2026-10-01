@@ -57,19 +57,19 @@ User Interface ← MinimalCockpit ← Audio Service ← TTS Engine
 #### 4. Audio Service (`src/services/audioService.ts`)
 - **Purpose**: Text-to-Speech and audio focus management
 - **Key Methods**:
-  - `initialize()`: Configure expo-av audio mode with ducking
+  - `initialize()`: Configure expo-audio audio mode with ducking
   - `speak(text, priority)`: Speak text with priority-based interruption
   - `speakTurn(turn)`: Generate Turkish turn announcement
   - `speakNotification(notification)`: Announce community notifications
   - `stop()`: Stop current speech
   - `setDuckingLevel(level)`: Adjust audio ducking (0.1-1.0)
 - **Audio Mode**:
-  - `playsInSilentModeIOS`: true
-  - `staysActiveInBackground`: true
-  - `interruptionModeIOS`: DuckOthers (2)
-  - `interruptionModeAndroid`: DuckOthers (2)
-  - `shouldDuckAndroid`: true
-- **Dependencies**: expo-speech, expo-av
+  - `playsInSilentMode`: true
+  - `shouldPlayInBackground`: true
+  - `interruptionMode`: `'duckOthers'` (applies to iOS + Android)
+  - `allowsRecording`: false
+  - `shouldRouteThroughEarpiece`: false
+- **Dependencies**: expo-speech, expo-audio
 
 #### 5. Haptic Service (`src/services/hapticService.ts`)
 - **Purpose**: Haptic feedback patterns for turns and notifications
@@ -209,11 +209,15 @@ npx expo run:ios      # iOS
 - **Runner**: `ubuntu-latest`
 - **Steps**:
   1. Checkout code
-  2. Setup Node.js 20 with npm cache
-  3. Expo GitHub Action (installs eas-cli)
-  4. npm install
-  5. EAS Build (Android APK, preview profile)
+  2. Setup Node.js 22 with npm cache
+  3. `npm ci` (lockfile is committed and must stay in sync with package.json)
+  4. `npx expo config --type public` (fail fast if the Expo config is invalid)
+  5. `npx eas-cli build --platform android --profile preview --non-interactive`
 - **Required Secret**: `EXPO_TOKEN`
+- **Note**: the deprecated `expo/expo-github-action` is NOT used. It installs the
+  legacy, end-of-life `expo-cli`, which cannot evaluate an SDK 57 project config
+  (it fails with `expo config ... exited with non-zero code` or
+  `Unexpected token 'typeof'`). EAS CLI alone is sufficient.
 
 ### EAS Build Profiles (`eas.json`)
 - `preview`: APK, internal distribution
@@ -222,8 +226,35 @@ npx expo run:ios      # iOS
 ## Known Issues and Solutions
 
 ### Expo Config Validation Error
-**Issue**: `The field "cli.appVersionSource" is not set`
-**Solution**: Ensure `app.json` contains `"cli": { "appVersionSource": "local" }` and use `expo/expo-github-action` with correct `token` parameter.
+**Issue**: `The field "cli.appVersionSource" is not set` or `expo config --json exited with non-zero code: 1`
+**Solution**: Set `"cli": { "appVersionSource": "local" }` in **both** `app.json`
+(`expo.cli`) and `eas.json` (`cli`). Never install the legacy `expo-cli`; it cannot
+read modern (SDK 50+) project configs.
+
+### EAS Build Fails Immediately (2 seconds)
+**Issue**: `Package "expo-speech" does not contain a valid config plugin` followed by
+a hard failure before the build is uploaded.
+**Root Cause**: Only packages that ship an `app.plugin.js` may be listed in
+`expo.plugins`. `expo-speech` and `expo-haptics` have no config plugin (autolinking
+handles them), and `expo-av` no longer exists in SDK 57 (use `expo-audio`).
+**Solution**: `plugins` only lists `expo-location`, `expo-audio`, `expo-task-manager`,
+`expo-background-fetch` and `expo-splash-screen`.
+
+### Version Matrix Drift (root cause of past build failures)
+**Issue**: Builds fail right after `npm install` even though install succeeds.
+**Root Cause**: `package.json`, `package-lock.json` and the installed Expo SDK were
+out of sync (lockfile pinned SDK 51 while package.json claimed SDK 57, and the
+declared versions did not exist for that SDK).
+**Solution**: One source of truth. Native module versions come from
+`node_modules/expo/bundledNativeModules.json`. After any dependency change run
+`npm install` and **commit `package-lock.json`**; CI uses `npm ci`.
+
+### Missing Assets Break the Build
+**Issue**: `expo prebuild` / EAS fails because `assets/icon.png` etc. cannot be found.
+**Root Cause**: The `assets/` directory was empty and git does not track empty
+directories, so CI checkouts had no images at all.
+**Solution**: `assets/` must contain `icon.png` (1024x1024), `adaptive-icon.png`,
+`splash.png` and `favicon.png`, and they must be committed.
 
 ### TypeScript Errors in CI
 **Issue**: Missing type declarations for react-native
@@ -231,7 +262,7 @@ npx expo run:ios      # iOS
 
 ### Audio Ducking Not Working
 **Issue**: Background audio doesn't duck
-**Solution**: Ensure `shouldDuckAndroid: true` and `interruptionModeAndroid: 2` (DuckOthers) are set in `Audio.setAudioModeAsync`.
+**Solution**: Ensure `interruptionMode: 'duckOthers'` and `shouldPlayInBackground: true` are set via `setAudioModeAsync` from `expo-audio`.
 
 ## Testing
 - Unit tests for CurvatureService (bearing, distance, curvature calculations)

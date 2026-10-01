@@ -29,25 +29,6 @@ export const HeadDownScreen: React.FC<HeadDownScreenProps> = ({ onExitHeadDown }
   const hapticService = new HapticService();
   const locationService = new LocationService();
 
-  useEffect(() => {
-    audioService.initialize();
-    hapticService.initialize();
-
-    const callbacks: LocationServiceCallbacks = {
-      onLocationUpdate: handleLocationUpdate,
-      onTurnDetected: handleTurnDetected,
-      onSpeedChange: handleSpeedChange,
-      onError: (error) => console.error('Location error:', error),
-    };
-
-    locationService.startTracking(callbacks);
-
-    return () => {
-      locationService.stopTracking();
-      audioService.stop();
-    };
-  }, []);
-
   const handleLocationUpdate = (location: Location.LocationObject) => {
     setRegion({
       latitude: location.coords.latitude,
@@ -102,6 +83,25 @@ export const HeadDownScreen: React.FC<HeadDownScreenProps> = ({ onExitHeadDown }
     };
     audioService.speakNotification(notification);
   };
+
+  useEffect(() => {
+    audioService.initialize();
+    hapticService.initialize();
+
+    const callbacks: LocationServiceCallbacks = {
+      onLocationUpdate: handleLocationUpdate,
+      onTurnDetected: handleTurnDetected,
+      onSpeedChange: handleSpeedChange,
+      onError: (error) => console.error('Location error:', error),
+    };
+
+    locationService.startTracking(callbacks);
+
+    return () => {
+      locationService.stopTracking();
+      audioService.stop();
+    };
+  }, []);
 
   return (
     <View style={styles.container}>

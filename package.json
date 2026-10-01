@@ -1,40 +1,44 @@
 {
   "name": "audiopilot",
   "version": "1.0.0",
-  "main": "node_modules/expo/AppEntry.js",
+  "main": "index.js",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "doctor": "expo-doctor",
+    "prebuild": "expo prebuild",
+    "build:apk": "eas build --platform android --profile preview"
   },
   "dependencies": {
     "@turf/turf": "^6.5.0",
-    "expo": "~57.0.0",
-    "expo-av": "~15.0.0",
-    "expo-background-fetch": "~13.0.0",
-    "expo-haptics": "~14.0.0",
-    "expo-keep-awake": "~14.0.0",
-    "expo-location": "~18.0.0",
-    "expo-speech": "~13.0.0",
-    "expo-task-manager": "~13.0.0",
-    "react": "18.2.0",
-    "react-native": "^0.76.0",
-    "react-native-maps": "^1.18.0",
-    "react-native-mmkv": "^2.12.2",
-    "react-native-svg": "^15.8.0"
+    "expo": "~57.0.26",
+    "expo-asset": "~57.0.18",
+    "expo-audio": "~57.0.5",
+    "expo-background-fetch": "~57.0.21",
+    "expo-haptics": "~57.0.3",
+    "expo-keep-awake": "~57.0.2",
+    "expo-location": "~57.0.20",
+    "expo-speech": "~57.0.3",
+    "expo-splash-screen": "~57.0.9",
+    "expo-system-ui": "~57.0.4",
+    "expo-task-manager": "~57.0.21",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-maps": "1.27.2",
+    "react-native-mmkv": "^3.3.3",
+    "react-native-svg": "15.15.4"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/react": "~18.2.0",
-    "@typescript-eslint/eslint-plugin": "^6.0.0",
-    "@typescript-eslint/parser": "^6.0.0",
-    "eas-cli": "^8.0.0",
-    "eslint": "^8.0.0",
-    "expo-cli": "^6.3.2",
-    "typescript": "~5.3.0"
+    "@types/node": "^22.20.4",
+    "@types/react": "~19.2.0",
+    "eas-cli": "^24.8.0",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~57.0.2",
+    "typescript": "~5.9.3"
   },
   "private": true
 }
