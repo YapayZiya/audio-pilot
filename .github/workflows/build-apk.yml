@@ -92,7 +92,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
         run: |
           set -euo pipefail
-          npx eas-cli build --platform android --profile preview --non-interactive --json > eas-build-result.json
+          npx eas-cli build --platform android --profile preview --non-interactive --no-wait --json > eas-build-result.json
           node -e "
             const fs = require('fs');
             const parsed = JSON.parse(fs.readFileSync('eas-build-result.json', 'utf8').trim());
