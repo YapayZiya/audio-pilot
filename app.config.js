@@ -1,4 +1,4 @@
-export default {
+module.exports = {
   expo: {
     name: 'AudioPilot',
     slug: 'audiopilot',
