@@ -1,0 +1,13 @@
+export const APP_NAME = 'AudioPilot';
+export const APP_VERSION = '1.0.0';
+export const DEFAULT_SPEED_LIMIT = 50;
+export const MAX_SPEED_LIMIT = 200;
+export const TURN_WARNING_DISTANCE = 300;
+export const SHARP_TURN_WARNING_DISTANCE = 200;
+export const AUDIO_LANGUAGE = 'tr-TR';
+export const CACHE_EXPIRY_DAYS = 7;
+export const NOTIFICATION_RADIUS_KM = 5;
+export const MAP_TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+export const MAP_ATTRIBUTION = '© OpenStreetMap contributors';
+export const LOCATION_TASK_NAME = 'background-location-task';
+export const BACKGROUND_FETCH_TASK = 'background-fetch-task';
