@@ -4,20 +4,25 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      build_id:
+        description: 'Download the APK of an existing EAS build. Leave empty to submit a new build.'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # Expo account that owns the EAS project. Override with the EAS_ACCOUNT secret.
+  # Expo account that owns the EAS project. Override with the EAS_ACCOUNT variable.
   EXPO_ACCOUNT: ${{ vars.EAS_ACCOUNT || 'yapayziya' }}
 
 jobs:
   build:
     name: Build APK (EAS)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 55
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,43 +70,95 @@ jobs:
             console.log('EAS project id: ' + id);
           "
 
-      - name: Build APK with EAS
-        run: npx eas-cli build --platform android --profile preview --non-interactive --wait --json > eas-build-result.json
+      - name: Choose action
+        id: mode
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-
-      - name: Report EAS build result
-        if: always()
-        run: |
-          node -e "
-            const fs = require('fs');
-            let text = '';
-            try { text = fs.readFileSync('eas-build-result.json', 'utf8').trim(); } catch {}
-            if (!text) { console.log('EAS produced no JSON output.'); process.exit(0); }
-            let parsed;
-            try { parsed = JSON.parse(text); } catch { console.log('EAS output was not JSON.'); process.exit(0); }
-            for (const b of (Array.isArray(parsed) ? parsed : [parsed])) {
-              if (!b || typeof b !== 'object') continue;
-              console.log('status:    ' + (b.status ?? 'unknown'));
-              console.log('dashboard: ' + (b.links?.build?.webUrl ?? 'n/a'));
-              const apk = b.artifacts?.buildUrl;
-              console.log('apk:       ' + (apk ?? 'n/a'));
-              if (apk) fs.writeFileSync('apk-url.txt', apk);
-            }
-          "
-
-      - name: Download APK
-        if: hashFiles('apk-url.txt') != ''
-        continue-on-error: true
+          REQUESTED_BUILD_ID: ${{ inputs.build_id }}
         run: |
           set -euo pipefail
-          curl -sSL --retry 3 -o audiopilot-preview.apk "$(cat apk-url.txt)"
+          if [ -n "${REQUESTED_BUILD_ID:-}" ]; then
+            echo "action=fetch" >> "$GITHUB_OUTPUT"
+            echo "build_id=$REQUESTED_BUILD_ID" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=submit" >> "$GITHUB_OUTPUT"
+          fi
+
+      # EAS builds run on Expo's servers and a free-tier queue can take a long
+      # time, so the push trigger only submits and reports. The build continues
+      # independently of this job.
+      - name: Submit EAS build
+        if: steps.mode.outputs.action == 'submit'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx eas-cli build --platform android --profile preview --non-interactive --json > eas-build-result.json
+          node -e "
+            const fs = require('fs');
+            const parsed = JSON.parse(fs.readFileSync('eas-build-result.json', 'utf8').trim());
+            const build = (Array.isArray(parsed) ? parsed : [parsed]).find((b) => b && typeof b === 'object') ?? {};
+            const id = build.id ?? '';
+            const url = build.links?.build?.webUrl ?? '';
+            if (!id) throw new Error('EAS did not return a build id');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'build_id=' + id + '\n');
+            const summary = [
+              '## EAS build submitted',
+              '',
+              '- status: ' + (build.status ?? 'unknown'),
+              '- build id: `' + id + '`',
+              '- dashboard: ' + url,
+              '',
+              'The build continues on Expo infrastructure. When it finishes, run this',
+              'workflow manually with **build_id** = `' + id + '` to attach the APK',
+              'to the run as an artifact.',
+            ].join('\n');
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
+            console.log('submitted build id: ' + id);
+            console.log('dashboard: ' + url);
+          "
+
+      - name: Wait for build and download APK
+        if: steps.mode.outputs.action == 'fetch'
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          BUILD_ID: ${{ steps.mode.outputs.build_id }}
+          DASHBOARD: https://expo.dev/accounts/${{ vars.EAS_ACCOUNT || 'yapayziya' }}/projects/audiopilot/builds/${{ steps.mode.outputs.build_id }}
+        run: |
+          set -euo pipefail
+          apk_url=""
+          for attempt in $(seq 1 50); do
+            if npx eas-cli build:view "$BUILD_ID" --json > view.json 2>/dev/null; then
+              status=$(node -p "JSON.parse(require('fs').readFileSync('view.json','utf8')).status ?? ''" 2>/dev/null || echo "")
+              echo "attempt ${attempt}/50  status=${status:-UNKNOWN}"
+              case "$status" in
+                FINISHED)
+                  apk_url=$(node -p "JSON.parse(require('fs').readFileSync('view.json','utf8')).artifacts?.buildUrl ?? ''" 2>/dev/null || echo "")
+                  break
+                  ;;
+                ERRORED|CANCELED)
+                  echo "::error::EAS build ${BUILD_ID} ended with status ${status}"
+                  exit 1
+                  ;;
+              esac
+            else
+              echo "attempt ${attempt}/50  could not read build ${BUILD_ID} yet"
+            fi
+            sleep 30
+          done
+          if [ -z "$apk_url" ]; then
+            echo "::error::Timed out waiting for build ${BUILD_ID}. Re-run this workflow with the same build_id once it finishes."
+            echo "Dashboard: ${DASHBOARD}"
+            exit 1
+          fi
+          echo "Downloading $apk_url"
+          curl -sSL --retry 3 -o audiopilot-preview.apk "$apk_url"
           ls -lh audiopilot-preview.apk
+          echo "## APK downloaded from build ${BUILD_ID}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK to workflow artifacts
-        if: always()
+        if: always() && hashFiles('audiopilot-preview.apk') != ''
         uses: actions/upload-artifact@v4
         with:
           name: audiopilot-preview-apk
           path: audiopilot-preview.apk
-          if-no-files-found: warn
+          if-no-files-found: error
