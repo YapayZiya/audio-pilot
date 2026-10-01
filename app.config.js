@@ -48,5 +48,8 @@ module.exports = {
       'expo-task-manager',
       'expo-background-fetch',
     ],
+    cli: {
+      appVersionSource: 'local',
+    },
   },
 };

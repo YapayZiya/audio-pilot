@@ -18,13 +18,10 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install EAS CLI
-        run: npm install -g eas-cli
-
       - name: Install dependencies
         run: npm install
 
       - name: Build APK with EAS
-        run: eas build --platform android --profile preview --non-interactive --clear-cache
+        run: npx eas build --platform android --profile preview --non-interactive --clear-cache
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
