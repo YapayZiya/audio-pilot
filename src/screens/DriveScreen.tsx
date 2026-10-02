@@ -7,9 +7,9 @@ import {
   Alert,
   AppState,
   AppStateStatus,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
@@ -19,6 +19,7 @@ import { HapticService } from '../services/hapticService';
 import { LocationService, LocationServiceCallbacks } from '../services/locationService';
 import { Turn, Notification } from '../models/types';
 import { MinimalCockpit } from '../components/MinimalCockpit';
+import { OsmMapBackground } from '../components/OsmMapBackground';
 
 type ScreenMode = 'splash' | 'drive' | 'head-down';
 
@@ -38,6 +39,7 @@ export const DriveScreen: React.FC = () => {
   });
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
 
   const audioService = new AudioService();
   const hapticService = new HapticService();
@@ -69,7 +71,11 @@ export const DriveScreen: React.FC = () => {
         setScreenMode('drive');
         KeepAwake.activateKeepAwake();
       } else {
-        Alert.alert('Konum İzni Gerekli', 'Sürüş modu için konum izni verilmelidir.');
+        setPermissionDenied(true);
+        audioService.speak(
+          'Konum izni verilmedi. Sürüş modu için konum izinlerini açmalısınız.',
+          'high'
+        );
       }
     } catch (error) {
       console.error('App initialization failed:', error);
@@ -199,37 +205,38 @@ export const DriveScreen: React.FC = () => {
           Ekrana bakmadan sürüşünüz tehlikedir. Sadece sesli ve haptik uyarılara güvenin.
         </Text>
       </View>
-      <TouchableOpacity style={styles.startButton} onPress={() => setScreenMode('drive')}>
-        <Text style={styles.startButtonText}>ANLADIĞIM</Text>
-      </TouchableOpacity>
+      {permissionDenied ? (
+        <View style={styles.permissionBox}>
+          <Text style={styles.permissionText}>
+            Konum izni verilmedi. Sürüş modu başlatılamaz.
+          </Text>
+          <TouchableOpacity style={styles.startButton} onPress={() => {
+            setPermissionDenied(false);
+            initializeApp();
+          }}>
+            <Text style={styles.startButtonText}>TEKRAR DENE</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.settingsButton} onPress={() => Linking.openSettings()}>
+            <Text style={styles.settingsButtonText}>Telefonda İzinleri Aç</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.startButton} onPress={() => setScreenMode('drive')}>
+          <Text style={styles.startButtonText}>ANLADIĞIM</Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 
   const renderDriveScreen = () => (
     <View style={styles.driveContainer}>
       {!isHeadDown && (
-        <MapView
-          style={styles.map}
-          region={region}
-          showsUserLocation
-          showsCompass
-          rotateEnabled={false}
-          pitchEnabled={false}
-          scrollEnabled={false}
-          zoomEnabled={false}
-          toolbarEnabled={false}
-        >
-          {upcomingTurn && (
-            <Marker
-              coordinate={{
-                latitude: upcomingTurn.latitude,
-                longitude: upcomingTurn.longitude,
-              }}
-              title="Viraj"
-              description={`${upcomingTurn.type.replace('_', ' ')} - ${upcomingTurn.distance}m`}
-            />
-          )}
-        </MapView>
+        <OsmMapBackground
+          latitude={region.latitude}
+          longitude={region.longitude}
+          upcomingTurn={upcomingTurn}
+          opacity={0.3}
+        />
       )}
 
       <MinimalCockpit
@@ -324,6 +331,28 @@ const styles = StyleSheet.create({
   startButtonText: {
     color: '#FFF',
     fontSize: 18,
+    fontWeight: '600',
+  },
+  permissionBox: {
+    alignItems: 'center',
+  },
+  permissionText: {
+    color: '#FF3B30',
+    fontSize: 15,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  settingsButton: {
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  settingsButtonText: {
+    color: '#CCC',
+    fontSize: 14,
     fontWeight: '600',
   },
   driveContainer: {

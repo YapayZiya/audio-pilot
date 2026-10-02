@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { AudioService } from '../services/audioService';
 import { HapticService } from '../services/hapticService';
 import { LocationService, LocationServiceCallbacks } from '../services/locationService';
 import { Turn, Notification } from '../models/types';
+import { OsmMapBackground } from '../components/OsmMapBackground';
 
 interface HeadDownScreenProps {
   onExitHeadDown: () => void;
@@ -105,15 +105,11 @@ export const HeadDownScreen: React.FC<HeadDownScreenProps> = ({ onExitHeadDown }
 
   return (
     <View style={styles.container}>
-      <MapView
-        style={styles.map}
-        region={region}
-        showsUserLocation
-        rotateEnabled={false}
-        pitchEnabled={false}
-        scrollEnabled={false}
-        zoomEnabled={false}
-        toolbarEnabled={false}
+      <OsmMapBackground
+        latitude={region.latitude}
+        longitude={region.longitude}
+        upcomingTurn={upcomingTurn}
+        opacity={0.2}
       />
 
       <View style={styles.overlay}>
