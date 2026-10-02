@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       build_id:
-        description: 'Download the APK of an existing EAS build. Leave empty to submit a new build.'
+        description: 'Download the APK of an existing EAS build instead of building the current commit.'
         required: false
         type: string
 
@@ -22,13 +22,14 @@ jobs:
   build:
     name: Build APK (EAS)
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    # EAS free-tier queues can be long: checkout/tests ~5m + queue + build up to ~4h.
+    timeout-minutes: 240
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -81,7 +82,6 @@ jobs:
           set -euo pipefail
           if [ -n "${REQUESTED_BUILD_ID:-}" ]; then
             echo "action=fetch" >> "$GITHUB_OUTPUT"
-            echo "build_id=$REQUESTED_BUILD_ID" >> "$GITHUB_OUTPUT"
           else
             echo "action=submit" >> "$GITHUB_OUTPUT"
           fi
@@ -96,7 +96,7 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
         run: |
-          npx eas-cli build:list --json --non-interactive --limit 20 > queued.json 2>/dev/null || exit 0
+          npx eas-cli build:list --json --non-interactive --limit 50 > queued.json 2>/dev/null || exit 0
           ids=$(node -e "
             const fs = require('fs');
             let parsed;
@@ -105,8 +105,9 @@ jobs:
             const pending = new Set(['NEW', 'IN_QUEUE', 'IN_PROGRESS', 'PENDING_CANCEL']);
             const sha = process.env.COMMIT_SHA;
             const stale = builds.filter((b) => {
-              const status = String(b?.status ?? '').toUpperCase().replace(/-/g, '_');
-              return b && b.id && pending.has(status) && b.gitCommitHash !== sha;
+              if (!b || !b.id) return false;
+              const status = String(b.status ?? '').toUpperCase().replace(/-/g, '_');
+              return pending.has(status) && b.gitCommitHash !== sha;
             });
             process.stdout.write(stale.map((b) => b.id).join(' '));
           ")
@@ -115,10 +116,8 @@ jobs:
             npx eas-cli build:cancel "$id" --non-interactive || true
           done
 
-      # EAS builds run on Expo's servers and a free-tier queue can take a long
-      # time, so the push trigger only submits and reports. The build continues
-      # independently of this job.
       - name: Submit EAS build
+        id: submit
         if: steps.mode.outputs.action == 'submit'
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -128,44 +127,58 @@ jobs:
           node -e "
             const fs = require('fs');
             const parsed = JSON.parse(fs.readFileSync('eas-build-result.json', 'utf8').trim());
-            const build = (Array.isArray(parsed) ? parsed : [parsed]).find((b) => b && typeof b === 'object') ?? {};
-            const id = build.id ?? '';
-            const url = build.links?.build?.webUrl ?? '';
-            if (!id) throw new Error('EAS did not return a build id');
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'build_id=' + id + '\n');
+            const builds = Array.isArray(parsed) ? parsed : [parsed];
+            const build = builds.find((b) => b && typeof b === 'object' && b.id) ?? {};
+            if (!build.id) throw new Error('EAS did not return a build id');
+            const account = build.app?.ownerAccount?.name ?? 'unknown';
+            const slug = build.app?.slug ?? 'audiopilot';
+            const dashboard = 'https://expo.dev/accounts/' + account + '/projects/' + slug + '/builds/' + build.id;
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'build_id=' + build.id + '\n');
             const summary = [
               '## EAS build submitted',
               '',
               '- status: ' + (build.status ?? 'unknown'),
-              '- build id: `' + id + '`',
-              '- dashboard: ' + url,
+              '- build id: `' + build.id + '`',
+              '- dashboard: ' + dashboard,
               '',
-              'The build continues on Expo infrastructure. When it finishes, run this',
-              'workflow manually with **build_id** = `' + id + '` to attach the APK',
-              'to the run as an artifact.',
+              'The workflow now waits for the build to finish on Expo infrastructure',
+              '(free-tier queues can take a while). When it finishes, the APK is',
+              'attached to this run as a workflow artifact.',
             ].join('\n');
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
-            console.log('submitted build id: ' + id);
-            console.log('dashboard: ' + url);
+            console.log('submitted build id: ' + build.id);
+            console.log('dashboard: ' + dashboard);
           "
 
-      - name: Wait for build and download APK
-        if: steps.mode.outputs.action == 'fetch'
+      - name: Wait for build to finish and get APK URL
+        if: always() && (steps.mode.outputs.action == 'submit' || steps.mode.outputs.action == 'fetch')
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          BUILD_ID: ${{ steps.mode.outputs.build_id }}
-          DASHBOARD: https://expo.dev/accounts/${{ vars.EAS_ACCOUNT || 'yapayziya' }}/projects/audiopilot/builds/${{ steps.mode.outputs.build_id }}
+          SUBMITTED_BUILD_ID: ${{ steps.submit.outputs.build_id }}
+          REQUESTED_BUILD_ID: ${{ inputs.build_id }}
+          DASHBOARD_ACCOUNT: ${{ vars.EAS_ACCOUNT || 'yapayziya' }}
         run: |
           set -euo pipefail
-          apk_url=""
-          for attempt in $(seq 1 50); do
+          if [ -n "${REQUESTED_BUILD_ID:-}" ]; then BUILD_ID="$REQUESTED_BUILD_ID"; else BUILD_ID="${SUBMITTED_BUILD_ID:-}"; fi
+          if [ -z "${BUILD_ID:-}" ]; then
+            echo "::error::No EAS build id available. The submit step did not complete or no build_id was provided."
+            exit 1
+          fi
+          # Free-tier EAS queues + build can exceed an hour, so poll for up to
+          # 120 minutes (240 x 30s) instead of giving up early.
+          for attempt in $(seq 1 240); do
             if npx eas-cli build:view "$BUILD_ID" --json > view.json 2>/dev/null; then
               status=$(node -p "JSON.parse(require('fs').readFileSync('view.json','utf8')).status ?? ''" 2>/dev/null || echo "")
-              echo "attempt ${attempt}/50  status=${status:-UNKNOWN}"
+              echo "attempt ${attempt}/240  status=${status:-UNKNOWN}"
               case "$status" in
                 FINISHED)
                   apk_url=$(node -p "JSON.parse(require('fs').readFileSync('view.json','utf8')).artifacts?.buildUrl ?? ''" 2>/dev/null || echo "")
-                  break
+                  if [ -n "$apk_url" ]; then
+                    printf '%s' "$apk_url" > apk-url.txt
+                    break
+                  fi
+                  echo "::error::Build ${BUILD_ID} finished but has no artifact URL."
+                  exit 1
                   ;;
                 ERRORED|CANCELED)
                   echo "::error::EAS build ${BUILD_ID} ended with status ${status}"
@@ -182,30 +195,36 @@ jobs:
                       console.log('logFiles: ' + JSON.stringify(b.logFiles));
                     }
                     if (b.app?.slug) {
-                      console.log('app: @' + (b.app.ownerAccount?.name ?? '?') + '/' + b.app.slug);
+                      console.log('dashboard: https://expo.dev/accounts/' + (b.app.ownerAccount?.name ?? process.env.DASHBOARD_ACCOUNT) + '/projects/' + b.app.slug + '/builds/' + b.id);
                     }
                   "
                   exit 1
                   ;;
               esac
             else
-              echo "attempt ${attempt}/50  could not read build ${BUILD_ID} yet"
+              echo "attempt ${attempt}/240  could not read build ${BUILD_ID} yet"
             fi
             sleep 30
           done
-          if [ -z "$apk_url" ]; then
-            echo "::error::Timed out waiting for build ${BUILD_ID}. Re-run this workflow with the same build_id once it finishes."
-            echo "Dashboard: ${DASHBOARD}"
+          if [ ! -f apk-url.txt ]; then
+            echo "::error::Timed out waiting for build ${BUILD_ID} after 120 minutes."
+            echo "Dashboard: https://expo.dev/accounts/${DASHBOARD_ACCOUNT}/projects/audiopilot/builds/${BUILD_ID}"
+            echo "Re-run this workflow with build_id=${BUILD_ID} once it finishes."
             exit 1
           fi
+
+      - name: Download APK
+        if: always() && hashFiles('apk-url.txt') != ''
+        run: |
+          set -euo pipefail
+          apk_url="$(cat apk-url.txt)"
           echo "Downloading $apk_url"
           curl -sSL --retry 3 -o audiopilot-preview.apk "$apk_url"
           ls -lh audiopilot-preview.apk
-          echo "## APK downloaded from build ${BUILD_ID}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload APK to workflow artifacts
         if: always() && hashFiles('audiopilot-preview.apk') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: audiopilot-preview-apk
           path: audiopilot-preview.apk

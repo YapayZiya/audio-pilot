@@ -211,11 +211,18 @@ npx expo run:ios      # iOS
   1. Checkout code
   2. Setup Node.js 22 with npm cache
   3. `npm ci` (lockfile is committed and must stay in sync with package.json)
-  4. `npx expo config --type public` (fail fast if the Expo config is invalid)
-  5. `eas init` (links or creates the EAS project; see below)
-  6. Assert `extra.eas.projectId` is now present
-  7. `npx eas-cli build --platform android --profile preview --non-interactive --wait --json`
-  8. Download the resulting APK and publish it as a workflow artifact
+  4. `npm test -- --ci` (unit tests must pass before a build is submitted)
+  5. `npx expo config --type public` (fail fast if the Expo config is invalid)
+  6. `eas init` (links or creates the EAS project; see below)
+  7. Assert `extra.eas.projectId` is now present
+  8. Cancel queued builds from older commits (see note below)
+  9. `npx eas-cli build --platform android --profile preview --non-interactive --no-wait --json`
+     - submits the build and prints the build id to the step summary immediately
+  10. Poll `npx eas-cli build:view <build_id> --json` every 30s for up to 120
+      minutes until the status is `FINISHED` (on `ERRORED`/`CANCELED` the step
+      fails and prints the EAS error + log files)
+  11. Download the APK from `artifacts.buildUrl` and publish it as a workflow
+      artifact (`audiopilot-preview-apk`)
 - **Required Secret**: `EXPO_TOKEN`
 - **Optional Secrets/Vars**:
   - `EAS_PROJECT_ID`: link an existing project instead of creating one
@@ -225,8 +232,13 @@ npx expo run:ios      # iOS
   legacy, end-of-life `expo-cli`, which cannot evaluate an SDK 57 project config
   (it fails with `expo config ... exited with non-zero code` or
   `Unexpected token 'typeof'`). EAS CLI alone is sufficient.
-- **Note**: `--wait` is required, otherwise the job turns green as soon as the
-  project is uploaded and never learns whether the APK actually compiled.
+- **Note**: the workflow must not finish green while the build is still queued.
+  Submitting with `--no-wait` + polling `build:view` is used instead of `--wait`
+  so the build id is visible in the step summary right after submission, even
+  if the run is cancelled or times out while waiting. Free-tier EAS queues can
+  exceed 30 minutes, so the poll window is 120 minutes and the job timeout is
+  240 minutes. If it still times out, re-run the workflow manually with the
+  `build_id` input to attach the APK to that run.
 - **Note**: the submit path first cancels queued builds that belong to older
   commits. Every push submits a build and the Expo plan only allows a limited
   number of concurrent builds, so without this a burst of pushes leaves several
