@@ -285,6 +285,17 @@ declared versions did not exist for that SDK).
 `node_modules/expo/bundledNativeModules.json`. After any dependency change run
 `npm install` and **commit `package-lock.json`**; CI uses `npm ci`.
 
+### Lockfile Regenerated With A Newer npm Breaks CI
+**Issue**: `npm ci` on CI fails immediately with `Missing: <pkg>@<ver> from
+lock file` even though `npm install` succeeded locally.
+**Root Cause**: The lockfile was regenerated with a newer npm major than CI
+uses (CI runs Node 22 → npm 10). A lockfile written by npm 11 (Node 24) is
+not accepted by `npm ci` on npm 10.
+**Solution**: Always regenerate the lockfile with npm 10:
+`npx npm@10 install` or, for a single removal,
+`npx npm@10 uninstall <pkg> --package-lock-only`. Verify with
+`npx npm@10 ci` before committing.
+
 ### Missing Assets Break the Build
 **Issue**: `expo prebuild` / EAS fails because `assets/icon.png` etc. cannot be found.
 **Root Cause**: The `assets/` directory was empty and git does not track empty
