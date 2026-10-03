@@ -1,7 +1,8 @@
 import React, { useMemo } from 'react';
 import { View, Image, Text, Pressable, StyleSheet, Dimensions } from 'react-native';
+import { Svg, Polyline } from 'react-native-svg';
 import { MAP_TILE_URL, MAP_ATTRIBUTION } from '../utils/constants';
-import { Turn } from '../models/types';
+import { RoutePoint, Turn } from '../models/types';
 
 const ZOOM = 13;
 const TILE_PX = 256;
@@ -51,6 +52,8 @@ interface OsmMapBackgroundProps {
   opacity?: number;
   /** Enables tap-to-pick: reports the tapped map coordinate. */
   onMapTap?: (lat: number, lon: number) => void;
+  /** Optional route geometry to draw as a polyline on the map. */
+  route?: RoutePoint[] | null;
 }
 
 // Pure-JS OpenStreetMap tile background (3x3 tiles, user pinned to screen
@@ -62,6 +65,7 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
   marker,
   opacity = 0.3,
   onMapTap,
+  route,
 }) => {
   const { width: screenW, height: screenH } = Dimensions.get('window');
 
@@ -124,6 +128,12 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
       markerPos = project(marker.latitude, marker.longitude);
     }
 
+    const routePoints = route
+      ? route
+          .map((p) => project(p.latitude, p.longitude))
+          .filter((p): p is { left: number; top: number } => p !== null)
+      : [];
+
     return {
       gridLeft: screenW / 2 - userGridX,
       gridTop: screenH / 2 - userGridY,
@@ -131,10 +141,11 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
       tiles,
       turn,
       markerPos,
+      routePoints,
       user,
       n,
     };
-  }, [latitude, longitude, upcomingTurn, marker, screenW, screenH]);
+  }, [latitude, longitude, upcomingTurn, marker, route, screenW, screenH]);
 
   if (!model) {
     return <View style={[StyleSheet.absoluteFill, { opacity, backgroundColor: '#000' }]} />;
@@ -240,6 +251,18 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
           height: model.gridW,
         }}
       >
+        {model.routePoints.length > 1 ? (
+          <Svg width={model.gridW} height={model.gridW} style={{ position: 'absolute' }}>
+            <Polyline
+              points={model.routePoints.map((p) => `${p.left},${p.top}`).join(' ')}
+              fill="none"
+              stroke="rgba(0, 122, 255, 0.85)"
+              strokeWidth={4}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </Svg>
+        ) : null}
         {dots}
       </View>
 
