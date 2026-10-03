@@ -5,21 +5,21 @@ Görünmez Sürüş Asistanı - Audio-First Driving Safety Assistant
 AudioPilot, sürücülerin telefona bakmalarını gerektirmeyen, tamamen sesli ve haptik geri bildirim ile çalışan bir sürüş güvenlik asistanıdır.
 
 ## Özellikler
-- 🗺️ **Ücretsiz Harita**: OpenStreetMap tabanlı harita (Google Maps API yerine)
-- 📍 **Arka Plan Konum**: Sürekli GPS takibi
-- 🎙️ **Sesli Uyarılar**: Türkçe TTS motoru ile viraj uyarıları
+- 🗺️ **Rotalı Sürüş**: Nominatim arama + OSRM rota hesaplama + rota-relative viraj uyarıları
+- 📍 **Arka Plan Konum**: 1Hz GPS takibi ile gerçek zamanlı rota takibi
+- 🎙️ **Sesli Uyarılar**: Türkçe TTS motoru ile viraj, radar ve varış uyarıları
 - 📳 **Haptik Geri Bildirim**: Sol/sağ viraj titreşim paternleri
 - 🧠 **Viraj Analizi**: OSM verilerinden eğrilik hesaplama
 - 📴 **Çevrimdışı Mod**: Önbelleğe alınmış rota verisi ile çalışma
 - 🚨 **Topluluk Bildirimleri**: Radar ve kaza bildirimleri
+- 🎯 **Head-Down Modu**: Siyah ekran + sadece ses modu
 
 ## Teknolojiler
 - **Framework**: React Native (Expo SDK 57)
-- **Harita**: OpenStreetMap (OSM) Overpass API + react-native-maps
-- **Konum**: expo-location (High Accuracy GPS)
+- **Harita**: OpenStreetMap (OSM) tile background + destination selection
+- **Konum**: expo-location (High Accuracy 1Hz GPS)
 - **Ses**: expo-speech (TTS) + expo-audio (Audio Focus / Ducking)
 - **Haptik**: expo-haptics
-- **Depolama**: react-native-mmkv (Offline cache)
 - **CI/CD**: GitHub Actions + EAS Build
 
 ## Kurulum
@@ -64,17 +64,20 @@ AudioPilot/
 ├── assets/                      # Uygulama görselleri
 ├── src/
 │   ├── components/
-│   │   └── MinimalCockpit.tsx   # Hız ve viraj göstergesi komponenti
+│   │   ├── MinimalCockpit.tsx   # Hız ve viraj göstergesi komponenti
+│   │   └── OsmMapBackground.tsx # OpenStreetMap tile arka planı
 │   ├── models/
-│   │   └── types.ts             # TypeScript arayüzleri (Turn, RoadSegment, Notification)
+│   │   └── types.ts             # TypeScript arayüzleri (Turn, RouteInfo, SpeedCamera, Destination)
 │   ├── screens/
 │   │   ├── SplashScreen.tsx     # Yasal uyarı ekranı + Türkçe TTS
+│   │   ├── RouteSelectScreen.tsx# Hedef arama ve harita seçimi
 │   │   ├── DriveScreen.tsx      # Ana sürüş ekranı (kokpit UI)
 │   │   └── HeadDownScreen.tsx   # Siyah ekran + sadece ses modu
 │   ├── services/
-│   │   ├── osmService.ts        # OpenStreetMap Overpass API veri çekme
+│   │   ├── routeService.ts      # Nominatim/OSRM/Overpass entegrasyonu
+│   │   ├── routeMonitor.ts      # Rota-relative olay motoru
 │   │   ├── curvatureService.ts  # Viraj eğrilik hesaplama algoritması
-│   │   ├── locationService.ts   # Arka plan konum takibi servisi
+│   │   ├── locationService.ts   # 1Hz GPS arka plan konum takibi
 │   │   ├── audioService.ts      # TTS motoru + Audio Focus / Ducking yönetimi
 │   │   └── hapticService.ts     # Titreşim paternleri yönetimi
 │   └── utils/
@@ -86,6 +89,24 @@ AudioPilot/
 ├── tsconfig.json                # TypeScript yapılandırması
 └── README.md                    # Proje dokümantasyonu
 ```
+
+## Mimarı
+
+### Sistem Akışı
+```
+Kullanıcı Girdisi (Arama / Harita Dokunuşu)
+        ↓
+Hedef Seçimi → Rota Servisi (OSRM)
+        ↓
+Aktif Sürüş Döngüsü:
+  Konum (1Hz) → RouteMonitor → Ses / Haptik / UI
+```
+
+### Rota-relative Sürüş
+- `RouteMonitor`, rota üzerindeki metreler ile viraj, radar ve varış olaylarını yönetir
+- `onTick(distanceFromStart, currentBearing, speed)` ile ilerleme güncellenir
+- Her olay, tekrar üreten duyuruları önlemek için benzersiz kimlikle çift öğelenme engellenir
+- Rota iletiminde: `distanceFromStart` kullanılır, `haversine` mesafe kullanılmaz
 
 ## Build Konfigürasyonu
 

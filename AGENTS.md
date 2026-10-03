@@ -7,52 +7,64 @@ AudioPilot, sürücülerin telefona bakmalarını gerektirmeyen, tamamen sesli v
 
 ### System Flow
 ```
-User Location → OSM Overpass API → Road Segments → Curvature Analysis → Turn Detection
-                                                                        ↓
-User Interface ← MinimalCockpit ← Audio Service ← TTS Engine
-                ← Haptic Service ← Viraj Uyarısı
+User Input (Search / Map Tap)
+        ↓
+Destination Selection → Route Service (OSRM)
+        ↓
+Active Drive Loop:
+  Location (1Hz) → RouteMonitor → Audio / Haptic / UI
 ```
 
 ### Core Components
 
-#### 1. Location Service (`src/services/locationService.ts`)
-- **Purpose**: High-accuracy background GPS tracking
+#### 1. Route Service (`src/services/routeService.ts`)
+- **Purpose**: Destination search, route computation, geometry helpers, offline speed cameras
 - **Key Methods**:
-  - `requestPermissions()`: Foreground + background location permissions
-  - `startTracking(callbacks)`: Starts GPS watch with configurable intervals
-  - `stopTracking()`: Cleanup location subscription
-  - `handleLocationUpdate()`: Processes location updates and triggers turn detection
-- **GPS Intervals**:
-  - Highway (>80 km/h): 10s interval, 500m distance filter
-  - City (<80 km/h): 5s interval, 50m distance filter
-- **Dependencies**: expo-location, OSMService, CurvatureService
+  - `searchDestination(query)`: Nominatim geocoding → `Destination`
+  - `buildRoute(origin, destination)`: OSRM route fetch → `RouteInfo`
+  - `projectPointOnRoute(coord, route)`: Closest point + progress + remaining distance
+  - `haversineDistance`, `bearing`: Pure geometry helpers
+  - `fetchSpeedCameras(bbox)`: Overpass speed cameras
+- **Network Providers**:
+  - Nominatim: `https://nominatim.openstreetmap.org`
+  - OSRM: `https://router.project-osrm.org`
+  - Overpass: `https://overpass-api.de/api/interpreter`
+- **Dependencies**: expo-location (for haversine/bearing)
 
-#### 2. OSM Service (`src/services/osmService.ts`)
-- **Purpose**: Fetch road data from OpenStreetMap Overpass API
+#### 2. Route Monitor (`src/services/routeMonitor.ts`)
+- **Purpose**: Turn-by-turn event engine using route-relative progress
 - **Key Methods**:
-  - `buildOverpassQuery(lat, lon, radius)`: Constructs Overpass QL query
-  - `fetchRoadData(lat, lon, radius)`: Fetches road segments from OSM
-  - `parseOSMData(data)`: Parses OSM JSON into RoadSegment objects
-  - `extractSpeedLimit(tags)`: Extracts speed limit from OSM way tags
-  - `cacheRoute()` / `getCachedRoute()`: Offline route caching with MMKV
-- **API Endpoint**: `https://overpass-api.de/api/interpreter`
-- **Query Scope**: 500m radius for city, 1000m for highway
-- **Dependencies**: react-native-mmkv for caching
-
-#### 3. Curvature Service (`src/services/curvatureService.ts`)
-- **Purpose**: Calculate road curvature and detect upcoming turns
-- **Key Methods**:
-  - `calculateBearing(lat1, lon1, lat2, lon2)`: Bearing angle between two points
-  - `haversineDistance(lat1, lon1, lat2, lon2)`: Distance in meters
-  - `calculateCurvatureRadius(points)`: Radius of curvature from 3+ points
-  - `classifyTurn(curvatureRadius, bearingChange)`: Classify turn type
-  - `calculateSafeSpeed(curvatureRadius, speedLimit)`: Safe speed based on lateral acceleration
-  - `findUpcomingTurns()`: Find turns within LOOKAHEAD_DISTANCE
+  - `start(route, callbacks)`: Prime event deduplication tables + schedule first events
+  - `onTick(distanceFromStart, currentBearing, speed)`: Advance route progress, emit events
+  - `stop()`: Clear timers and state
+- **Events**:
+  - `onTurnUpdate(turn)`: Upcoming turn within 300m, deduplicated by turn id
+  - `onCurveSpeedAlert(curve, recommendedSpeed)`: Curve safe-speed warning, deduplicated by curve index
+  - `onRadarAlert(camera)`: Speed camera within radar range
+  - `onRouteProgress(progress)`: Throttled progress updates (at most every 2s)
+  - `onDestinationApproach(route)`: Remaining distance crosses 500m threshold
+  - `onArrival(route)`: Remaining distance ≤ 30m
 - **Constants**:
   - `TURN_DETECTION_THRESHOLD`: 15 degrees
   - `CURVATURE_RADIUS_SHARP`: 150m
   - `CURVATURE_RADIUS_GENTLE`: 500m
   - `LOOKAHEAD_DISTANCE`: 300m
+  - `TURN_WARNING_DISTANCE`: 300m
+  - `SHARP_TURN_WARNING_DISTANCE`: 200m
+  - `DESTINATION_APPROACH_DISTANCE`: 500m
+  - `ARRIVAL_DISTANCE`: 30m
+
+#### 3. Location Service (`src/services/locationService.ts`)
+- **Purpose**: High-accuracy 1Hz GPS tracking
+- **Key Methods**:
+  - `requestPermissions()`: Foreground + background location permissions
+  - `startTracking(callbacks)`: Starts GPS watch with 1s interval
+  - `stopTracking()`: Cleanup location subscription
+- **GPS Configuration**:
+  - `Accuracy.Highest`
+  - `timeInterval: 1000` (1Hz)
+  - Distance filter: 500m highway / 50m city
+- **Dependencies**: expo-location, RouteService, RouteMonitor
 
 #### 4. Audio Service (`src/services/audioService.ts`)
 - **Purpose**: Text-to-Speech and audio focus management
@@ -60,13 +72,18 @@ User Interface ← MinimalCockpit ← Audio Service ← TTS Engine
   - `initialize()`: Configure expo-audio audio mode with ducking
   - `speak(text, priority)`: Speak text with priority-based interruption
   - `speakTurn(turn)`: Generate Turkish turn announcement
+  - `speakCurveSpeedAlert(curve, recommendedSpeed)`: Curve warning
+  - `speakRadarAlert(camera)`: Speed camera warning
+  - `speakDestinationApproach(route)`: Approaching destination
+  - `speakArrival(route)`: Arrived at destination
+  - `speakRouteReady(route)`: Route is ready to drive
   - `speakNotification(notification)`: Announce community notifications
   - `stop()`: Stop current speech
   - `setDuckingLevel(level)`: Adjust audio ducking (0.1-1.0)
 - **Audio Mode**:
   - `playsInSilentMode`: true
   - `shouldPlayInBackground`: true
-  - `interruptionMode`: `'duckOthers'` (applies to iOS + Android)
+  - `interruptionMode`: `'duckOthers'`
   - `allowsRecording`: false
   - `shouldRouteThroughEarpiece`: false
 - **Dependencies**: expo-speech, expo-audio
@@ -75,34 +92,56 @@ User Interface ← MinimalCockpit ← Audio Service ← TTS Engine
 - **Purpose**: Haptic feedback patterns for turns and notifications
 - **Key Methods**:
   - `triggerTurnHaptic(turn)`: Direction-specific haptic
-    - Sharp turns: NotificationWarning + Heavy impact
-    - Gentle turns: Medium impact
   - `triggerNotificationHaptic(notification)`: Priority-based haptic
-    - High: NotificationError
-    - Medium: NotificationWarning
-    - Low: Light impact
   - `triggerConfirmationHaptic()`: Light impact for button presses
 - **Dependencies**: expo-haptics
 
-#### 6. UI Components
+#### 6. Curvature Service (`src/services/curvatureService.ts`)
+- **Purpose**: Calculate road curvature and classify turns
+- **Key Methods**:
+  - `calculateBearing(lat1, lon1, lat2, lon2)`: Bearing angle between two points
+  - `haversineDistance(lat1, lon1, lat2, lon2)`: Distance in meters
+  - `calculateCurvatureRadius(points)`: Radius of curvature from 3+ points
+  - `classifyTurn(curvatureRadius, bearingChange)`: Classify turn type
+  - `calculateSafeSpeed(curvatureRadius, speedLimit)`: Safe speed based on lateral acceleration
+  - `findUpcomingTurns(coordinates, currentIndex)`: Find turns ahead of current position
+- **Constants**:
+  - `TURN_DETECTION_THRESHOLD`: 15 degrees
+  - `CURVATURE_RADIUS_SHARP`: 150m
+  - `CURVATURE_RADIUS_GENTLE`: 500m
+  - `LOOKAHEAD_DISTANCE`: 300m
+- **Dependencies**: None (pure functions)
+
+#### 7. UI Components
+
+##### RouteSelectScreen (`src/screens/RouteSelectScreen.tsx`)
+- **Purpose**: Destination search and map-tap selection UI
+- **Features**:
+  - Nominatim search bar with debounced input
+  - Map tap to select destination
+  - Shows destination marker
+  - Callbacks: `onDestinationSelected`, `onUseMyLocation`
 
 ##### MinimalCockpit (`src/components/MinimalCockpit.tsx`)
-- **Purpose**: Minimalist driving UI with speedometer and turn indicator
+- **Purpose**: Minimalist driving UI with speedometer, turn indicator, and route status
 - **Props**:
   - `currentSpeed`, `speedLimit`, `recommendedSpeed`
   - `upcomingTurn`, `distanceToTurn`
   - `isHeadDown`: Toggle minimal mode
+  - `routeStatus`: Route state text
 - **Features**:
   - SVG-based compass arrow (direction + intensity)
   - Large speed display with color coding
   - Speed limit sign (right side)
   - Recommended speed badge
   - Animated warning for sharp turns <200m
+  - Route status display
 
 ##### DriveScreen (`src/screens/DriveScreen.tsx`)
 - **Purpose**: Main driving screen with map and controls
 - **States**:
   - `splash`: Legal disclaimer + audio warning
+  - `route-select`: Destination search + map tap
   - `drive`: Active driving mode
   - `head-down`: Black screen + audio only
 - **Features**:
@@ -129,6 +168,50 @@ User Interface ← MinimalCockpit ← Audio Service ← TTS Engine
 
 ## Data Models (`src/models/types.ts`)
 
+### Destination
+```typescript
+interface Destination {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  kind?: string;
+}
+```
+
+### RoutePoint
+```typescript
+interface RoutePoint {
+  latitude: number;
+  longitude: number;
+}
+```
+
+### RouteInfo
+```typescript
+interface RouteInfo {
+  id: string;
+  destination: Destination;
+  coordinates: RoutePoint[];
+  totalDistance: number;
+  totalDuration: number;
+  turns: Turn[];
+  speedCameras: SpeedCamera[];
+  fetchedAt: number;
+}
+```
+
+### SpeedCamera
+```typescript
+interface SpeedCamera {
+  id: string;
+  latitude: number;
+  longitude: number;
+  speedLimit: number;
+  routeDistanceAt: number;
+}
+```
+
 ### Turn
 ```typescript
 interface Turn {
@@ -136,12 +219,13 @@ interface Turn {
   latitude: number;
   longitude: number;
   bearing: number;
-  curvatureRadius: number;  // meters, Infinity = straight
+  curvatureRadius: number;
   type: 'sharp_left' | 'sharp_right' | 'gentle_left' | 'gentle_right' | 'straight';
   speedLimit: number;
   recommendedSpeed: number;
-  distance: number;         // meters from current location
+  distance: number;
   osmWayId: string;
+  routeDistanceAt?: number;
 }
 ```
 
@@ -193,6 +277,11 @@ interface CachedRoute {
 - `MAP_TILE_URL`: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
 - `LOCATION_TASK_NAME`: 'background-location-task'
 - `BACKGROUND_FETCH_TASK`: 'background-fetch-task'
+- `NOMINATIM_SEARCH_URL`: 'https://nominatim.openstreetmap.org/search'
+- `OSRM_ROUTE_URL`: 'https://router.project-osrm.org/route/v1/driving'
+- `OVERPASS_ENDPOINT`: 'https://overpass-api.de/api/interpreter'
+- `GPS_ACCURACY`: Accuracy.Highest
+- `GPS_TIME_INTERVAL`: 1000 ms (1Hz)
 
 ## Build and Deployment
 
@@ -204,7 +293,22 @@ npx expo run:android  # Android
 npx expo run:ios      # iOS
 ```
 
-### CI/CD Pipeline (GitHub Actions)
+### Testing
+```bash
+npm test
+```
+
+### TypeScript
+```bash
+npx tsc --noEmit
+```
+
+### Lint
+```bash
+npx eslint src App.tsx index.js
+```
+
+## CI/CD Pipeline (GitHub Actions)
 - **Trigger**: Push to `main` branch or manual dispatch
 - **Runner**: `ubuntu-latest`
 - **Steps**:
@@ -313,12 +417,17 @@ directories, so CI checkouts had no images at all.
 
 ## Testing
 - **Runner**: Jest via the `jest-expo` preset (pinned to the SDK). `npm test` runs the suite.
-- **Unit tests (done)**: `src/services/__tests__/curvatureService.test.ts` covers
+- **Unit tests**: `src/services/__tests__/curvatureService.test.ts` covers
   `calculateBearing`, `haversineDistance`, `normalizeBearingDelta`,
   `calculateCurvatureRadius`, `classifyTurn`, `calculateSafeSpeed` and
   `findUpcomingTurns`.
-- **Not covered yet**: `OSMService.buildOverpassQuery` / `parseOSMData`,
-  `LocationService` callbacks, and the React Native screens.
+- **Unit tests**: `src/services/__tests__/routeService.test.ts` covers
+  `haversineDistance`, `bearing`, `buildOverpassQuery`, `parseOSMData`,
+  `searchDestination`, `buildRoute`, `projectPointOnRoute`, `fetchSpeedCameras`.
+- **Unit tests**: `src/services/__tests__/routeMonitor.test.ts` covers
+  event deduplication, turn updates, curve speed alerts, radar alerts,
+  route progress, destination approach, and arrival.
+- **Not covered yet**: React Native screens and integration tests.
 - **Manual testing** on a physical device is still required for GPS, haptics and
   audio focus, none of which can be covered by unit tests.
 - Tests run in CI (`npm test -- --ci`) before an APK build is submitted.
@@ -330,6 +439,8 @@ directories, so CI checkouts had no images at all.
   any comparison. A turn from 350° to 10° is a raw delta of -340°, not +340°.
 - `findUpcomingTurns` trusts the caller to pass a `currentBearing` consistent
   with the road geometry; a mismatched heading is reported as a turn.
+- Route-relative progress uses meters-from-route-start (`distanceFromStart`),
+  not haversine-from-current-location.
 
 ## Future Improvements
 - [ ] Implement actual map matching algorithm
@@ -339,3 +450,6 @@ directories, so CI checkouts had no images at all.
 - [ ] Machine learning for turn prediction
 - [ ] Voice command support
 - [ ] Multi-language support (TR/EN)
+- [ ] Rerouting on route deviation
+- [ ] ETA and remaining distance announcements
+- [ ] Speed limit sign detection from OSM tags along route

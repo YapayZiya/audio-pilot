@@ -4,6 +4,12 @@ import Svg, { Circle, Line, Path, Defs, LinearGradient, Stop } from 'react-nativ
 import * as Speech from 'expo-speech';
 import { Turn } from '../models/types';
 
+export interface RouteStatus {
+  destinationName: string;
+  remainingKm: number;
+  remainingMin: number;
+}
+
 interface MinimalCockpitProps {
   currentSpeed: number;
   speedLimit: number;
@@ -11,6 +17,7 @@ interface MinimalCockpitProps {
   upcomingTurn: Turn | null;
   distanceToTurn: number | null;
   isHeadDown: boolean;
+  routeStatus?: RouteStatus | null;
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -22,6 +29,7 @@ export const MinimalCockpit: React.FC<MinimalCockpitProps> = ({
   upcomingTurn,
   distanceToTurn,
   isHeadDown,
+  routeStatus,
 }) => {
   const [pulseAnim] = useState(new Animated.Value(1));
   const [warningOpacity] = useState(new Animated.Value(0));
@@ -154,6 +162,13 @@ export const MinimalCockpit: React.FC<MinimalCockpitProps> = ({
           <View style={[styles.statusDot, { backgroundColor: '#34C759' }]} />
           <Text style={styles.statusText}>GPS Aktif</Text>
         </View>
+        {routeStatus ? (
+          <View style={styles.routeStatusPill}>
+            <Text style={styles.routeStatusText} numberOfLines={1}>
+              ⚑ {routeStatus.destinationName} • {routeStatus.remainingKm} km • {routeStatus.remainingMin} dk
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.mainContent}>
@@ -201,6 +216,18 @@ const styles = StyleSheet.create({
   statusText: {
     color: '#888',
     fontSize: 12,
+    fontFamily: 'monospace',
+  },
+  routeStatusPill: {
+    backgroundColor: 'rgba(0, 122, 255, 0.25)',
+    borderRadius: 12,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    maxWidth: '55%',
+  },
+  routeStatusText: {
+    color: '#DDEBFF',
+    fontSize: 11,
     fontFamily: 'monospace',
   },
   mainContent: {

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { View, Image, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Image, Text, Pressable, StyleSheet, Dimensions } from 'react-native';
 import { MAP_TILE_URL, MAP_ATTRIBUTION } from '../utils/constants';
 import { Turn } from '../models/types';
 
@@ -34,11 +34,23 @@ function tileUrl(z: number, x: number, y: number): string {
     .replace('{y}', String(y));
 }
 
+/** Inverse Mercator: fractional tile Y -> latitude. */
+function latFromNumY(numY: number, z: number): number {
+  const n = 2 ** z;
+  const f = numY / n;
+  const lat = (180 / Math.PI) * Math.atan(Math.sinh(Math.PI * (1 - 2 * f)));
+  return clampLat(lat);
+}
+
 interface OsmMapBackgroundProps {
   latitude: number;
   longitude: number;
   upcomingTurn?: Turn | null;
+  /** Extra marker (e.g. a selected destination). */
+  marker?: { latitude: number; longitude: number } | null;
   opacity?: number;
+  /** Enables tap-to-pick: reports the tapped map coordinate. */
+  onMapTap?: (lat: number, lon: number) => void;
 }
 
 // Pure-JS OpenStreetMap tile background (3x3 tiles, user pinned to screen
@@ -47,7 +59,9 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
   latitude,
   longitude,
   upcomingTurn,
+  marker,
   opacity = 0.3,
+  onMapTap,
 }) => {
   const { width: screenW, height: screenH } = Dimensions.get('window');
 
@@ -79,20 +93,35 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
       }
     }
 
+    const project = (
+      lat: number,
+      lon: number
+    ): { left: number; top: number } | null => {
+      const t = tilePosition(lat, lon, ZOOM);
+      let dxTiles = t.x - user.x;
+      const dyTiles = t.y - user.y;
+      // Handle the antipodal wrap so points near the date line still show.
+      if (Math.abs(dxTiles + 1) < Math.abs(dxTiles)) dxTiles = dxTiles + 1;
+      if (Math.abs(dxTiles - 1) < Math.abs(dxTiles)) dxTiles = dxTiles - 1;
+      if (Math.abs(dxTiles) <= 1 && Math.abs(dyTiles) <= 1) {
+        const gx = (TILE_PX + dxTiles * TILE_PX + t.fx * TILE_PX) * scale;
+        const gy = (TILE_PX + dyTiles * TILE_PX + t.fy * TILE_PX) * scale;
+        return { left: gx - userGridX, top: gy - userGridY };
+      }
+      return null;
+    };
+
     let turn: { left: number; top: number; color: string } | null = null;
     if (upcomingTurn && Number.isFinite(upcomingTurn.latitude) && Number.isFinite(upcomingTurn.longitude)) {
-      const t = tilePosition(upcomingTurn.latitude, upcomingTurn.longitude, ZOOM);
-      const dxTiles = t.x - user.x;
-      const dyTiles = t.y - user.y;
-      if (Math.abs(dxTiles) <= 1 && Math.abs(dyTiles) <= 1) {
-        const turnGridX = (TILE_PX + dxTiles * TILE_PX + t.fx * TILE_PX) * scale;
-        const turnGridY = (TILE_PX + dyTiles * TILE_PX + t.fy * TILE_PX) * scale;
-        turn = {
-          left: turnGridX - userGridX,
-          top: turnGridY - userGridY,
-          color: upcomingTurn.type.includes('sharp') ? '#FF3B30' : '#FFCC00',
-        };
+      const p = project(upcomingTurn.latitude, upcomingTurn.longitude);
+      if (p) {
+        turn = { ...p, color: upcomingTurn.type.includes('sharp') ? '#FF3B30' : '#FFCC00' };
       }
+    }
+
+    let markerPos: { left: number; top: number } | null = null;
+    if (marker && Number.isFinite(marker.latitude) && Number.isFinite(marker.longitude)) {
+      markerPos = project(marker.latitude, marker.longitude);
     }
 
     return {
@@ -101,12 +130,28 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
       gridW,
       tiles,
       turn,
+      markerPos,
+      user,
+      n,
     };
-  }, [latitude, longitude, upcomingTurn, screenW, screenH]);
+  }, [latitude, longitude, upcomingTurn, marker, screenW, screenH]);
 
   if (!model) {
     return <View style={[StyleSheet.absoluteFill, { opacity, backgroundColor: '#000' }]} />;
   }
+
+  const handleTap = onMapTap
+    ? (e: { nativeEvent: { locationX: number; locationY: number } }) => {
+        const gx = e.nativeEvent.locationX - model.gridLeft;
+        const gy = e.nativeEvent.locationY - model.gridTop;
+        if (gx < 0 || gy < 0 || gx > model.gridW || gy > model.gridW) return;
+        const numX = model.user.x - 1 + gx / TILE_DISPLAY;
+        const numY = model.user.y - 1 + gy / TILE_DISPLAY;
+        const lon = (numX / model.n) * 360 - 180;
+        const lat = latFromNumY(numY, ZOOM);
+        onMapTap(lat, lon);
+      }
+    : undefined;
 
   const dots: React.ReactNode[] = [];
   dots.push(
@@ -139,14 +184,31 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
       />
     );
   }
+  if (model.markerPos) {
+    dots.push(
+      <View
+        key="marker-dot"
+        style={[
+          styles.dot,
+          {
+            left: model.markerPos.left - 8,
+            top: model.markerPos.top - 8,
+            width: 16,
+            height: 16,
+            borderRadius: 8,
+            backgroundColor: '#FF3B30',
+            borderColor: '#FFF',
+          },
+        ]}
+      />
+    );
+  }
 
   return (
-    <View
-      style={[
-        StyleSheet.absoluteFill,
-        { opacity, backgroundColor: '#0A0A0C', overflow: 'hidden' },
-      ]}
-      pointerEvents="none"
+    <Pressable
+      style={[StyleSheet.absoluteFill, { opacity, backgroundColor: '#0A0A0C', overflow: 'hidden' }]}
+      onPress={handleTap}
+      onLongPress={handleTap}
     >
       <View
         style={{
@@ -182,7 +244,7 @@ export const OsmMapBackground: React.FC<OsmMapBackgroundProps> = ({
       </View>
 
       <Text style={styles.attribution}>{MAP_ATTRIBUTION}</Text>
-    </View>
+    </Pressable>
   );
 };
 

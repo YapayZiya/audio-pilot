@@ -9,6 +9,45 @@ export interface Turn {
   recommendedSpeed: number;
   distance: number;
   osmWayId: string;
+  /** Meters from the route start (route-based turns only). */
+  routeDistanceAt?: number;
+}
+
+export interface Destination {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  kind?: string;
+}
+
+export interface RoutePoint {
+  latitude: number;
+  longitude: number;
+}
+
+export interface SpeedCamera {
+  id: string;
+  latitude: number;
+  longitude: number;
+  /** 0 = enforcement zone without a posted limit. */
+  speedLimit: number;
+  /** Meters from the route start. */
+  routeDistanceAt: number;
+}
+
+export interface RouteInfo {
+  id: string;
+  destination: Destination;
+  coordinates: RoutePoint[];
+  /** Total route distance in meters. */
+  totalDistance: number;
+  /** Total route duration in seconds. */
+  totalDuration: number;
+  /** Precomputed curves; `distance`/`routeDistanceAt` are meters from route start. */
+  turns: Turn[];
+  speedCameras: SpeedCamera[];
+  fetchedAt: number;
 }
 
 export interface RoadSegment {

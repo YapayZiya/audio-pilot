@@ -11,17 +11,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import * as Location from 'expo-location';
-import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import * as KeepAwake from 'expo-keep-awake';
 import { AudioService } from '../services/audioService';
 import { HapticService } from '../services/hapticService';
 import { LocationService, LocationServiceCallbacks } from '../services/locationService';
-import { Turn, Notification } from '../models/types';
+import { Destination, Notification, RouteInfo, SpeedCamera, Turn } from '../models/types';
 import { MinimalCockpit } from '../components/MinimalCockpit';
 import { OsmMapBackground } from '../components/OsmMapBackground';
+import { RouteSelectScreen } from './RouteSelectScreen';
 
-type ScreenMode = 'splash' | 'drive' | 'head-down';
+type ScreenMode = 'splash' | 'select-destination' | 'drive' | 'head-down';
 
 export const DriveScreen: React.FC = () => {
   const [screenMode, setScreenMode] = useState<ScreenMode>('splash');
@@ -34,9 +34,11 @@ export const DriveScreen: React.FC = () => {
   const [region, setRegion] = useState({
     latitude: 41.0082,
     longitude: 28.9784,
-    latitudeDelta: 0.01,
-    longitudeDelta: 0.01,
   });
+  const [route, setRoute] = useState<RouteInfo | null>(null);
+  const [destination, setDestination] = useState<Destination | null>(null);
+  const [remainingDistance, setRemainingDistance] = useState(0);
+  const [remainingTime, setRemainingTime] = useState(0);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
@@ -53,6 +55,106 @@ export const DriveScreen: React.FC = () => {
     }
   };
 
+  const addNotification = (notification: Notification) => {
+    setNotifications((prev) => [...prev, notification]);
+    setTimeout(() => {
+      setNotifications((prev) => prev.filter((n) => n.id !== notification.id));
+    }, 8000);
+  };
+
+  const handleTurnDetected = (turn: Turn) => {
+    setUpcomingTurn(turn);
+    setDistanceToTurn(turn.distance);
+    audioService.speakTurn(turn);
+    hapticService.triggerTurnHaptic(turn);
+  };
+
+  const handleTurnUpdate = (turn: Turn | null) => {
+    setUpcomingTurn(turn);
+    setDistanceToTurn(turn ? turn.distance : null);
+    if (turn) setRecommendedSpeed(turn.recommendedSpeed);
+  };
+
+  const handleCurveSpeedAlert = (turn: Turn) => {
+    audioService.speakCurveSpeedAlert();
+    hapticService.triggerNotificationHaptic({
+      id: 'curve_alert',
+      type: 'speed',
+      message: '',
+      priority: 'high',
+      distance: 0,
+      timestamp: Date.now(),
+    });
+    addNotification({
+      id: `curve_alert_${turn.id}`,
+      type: 'speed',
+      message: `Hızınızı düşürün! ${turn.distance}m sonra keskin viraj (güvenli: ${turn.recommendedSpeed} km/s)`,
+      priority: 'high',
+      distance: turn.distance,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleRadarAlert = (camera: SpeedCamera, distance: number) => {
+    audioService.speakRadarAlert(camera.speedLimit);
+    hapticService.triggerNotificationHaptic({
+      id: 'radar_alert',
+      type: 'police',
+      message: '',
+      priority: 'medium',
+      distance: 0,
+      timestamp: Date.now(),
+    });
+    addNotification({
+      id: `radar_${camera.id}_${distance}`,
+      type: 'police',
+      message:
+        camera.speedLimit > 0
+          ? `Radar! Hız sınırı ${camera.speedLimit} km/s (${distance}m)`
+          : `Radar bölgesi (${distance}m)`,
+      priority: 'medium',
+      distance,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleDestinationApproach = (distance: number) => {
+    audioService.speakDestinationApproach();
+    addNotification({
+      id: `dest_approach_${Date.now()}`,
+      type: 'turn',
+      message: `Varış noktasına ${distance}m kaldı`,
+      priority: 'medium',
+      distance,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleArrival = () => {
+    audioService.speakArrival();
+    addNotification({
+      id: `arrival_${Date.now()}`,
+      type: 'turn',
+      message: 'Varış noktasına ulaşıldı',
+      priority: 'medium',
+      distance: 0,
+      timestamp: Date.now(),
+    });
+  };
+
+  const handleRouteReady = useCallback((newRoute: RouteInfo | null, dest: Destination | null) => {
+    locationService.setRoute(newRoute);
+    setRoute(newRoute);
+    setDestination(dest);
+    setScreenMode('drive');
+    setIsHeadDown(false);
+    if (newRoute) {
+      audioService.speakRouteReady(newRoute.destination.name);
+    } else {
+      audioService.speak('Hedefsiz sürüş modu aktif. Yakınındaki virajlar izleniyor.', 'medium');
+    }
+  }, [audioService, locationService]);
+
   const initializeApp = async () => {
     try {
       await audioService.initialize();
@@ -63,12 +165,21 @@ export const DriveScreen: React.FC = () => {
         onTurnDetected: handleTurnDetected,
         onSpeedChange: handleSpeedChange,
         onError: handleLocationError,
+        onTurnUpdate: handleTurnUpdate,
+        onCurveSpeedAlert: handleCurveSpeedAlert,
+        onRadarAlert: handleRadarAlert,
+        onRouteProgress: (remainingDist, remainingSec) => {
+          setRemainingDistance(remainingDist);
+          setRemainingTime(remainingSec);
+        },
+        onDestinationApproach: handleDestinationApproach,
+        onArrival: handleArrival,
       };
 
       const trackingStarted = await locationService.startTracking(callbacks);
       if (trackingStarted) {
         setIsInitialized(true);
-        setScreenMode('drive');
+        setScreenMode('select-destination');
         KeepAwake.activateKeepAwake();
       } else {
         setPermissionDenied(true);
@@ -87,31 +198,12 @@ export const DriveScreen: React.FC = () => {
     setRegion({
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
-      latitudeDelta: 0.01,
-      longitudeDelta: 0.01,
     });
   };
 
-  const handleTurnDetected = (turn: Turn) => {
-    setUpcomingTurn(turn);
-    setDistanceToTurn(turn.distance);
-    audioService.speakTurn(turn);
-    hapticService.triggerTurnHaptic(turn);
-  };
-
+  // ~1 Hz GPS ticks: the speedometer must follow the real speed without lag.
   const handleSpeedChange = (speed: number) => {
     setCurrentSpeed(speed);
-    if (speed > 80) {
-      locationService.stopTracking();
-      setTimeout(async () => {
-        await locationService.startTracking({
-          onLocationUpdate: handleLocationUpdate,
-          onTurnDetected: handleTurnDetected,
-          onSpeedChange: handleSpeedChange,
-          onError: handleLocationError,
-        });
-      }, 1000);
-    }
   };
 
   const handleLocationError = (error: Error) => {
@@ -132,44 +224,30 @@ export const DriveScreen: React.FC = () => {
     }
   }, [isHeadDown, audioService]);
 
-  const toggleScreen = useCallback(() => {
-    if (screenMode === 'drive') {
-      setScreenMode('head-down');
-      setIsHeadDown(true);
-      KeepAwake.activateKeepAwake();
-    } else if (screenMode === 'head-down') {
-      setScreenMode('drive');
-      setIsHeadDown(false);
-      KeepAwake.deactivateKeepAwake();
-    }
-  }, [screenMode]);
-
   const reportPolice = useCallback(async () => {
     await hapticService.triggerConfirmationHaptic();
-    const notification: Notification = {
-      id: Date.now().toString(),
+    addNotification({
+      id: `police_${Date.now()}`,
       type: 'police',
       message: 'Polis kontrolü bildirildi.',
       priority: 'high',
       distance: 0,
       timestamp: Date.now(),
-    };
-    setNotifications((prev) => [...prev, notification]);
-    audioService.speakNotification(notification);
+    });
+    audioService.speak('Polis kontrolü bildirildi.', 'high');
   }, [audioService, hapticService]);
 
   const reportAccident = useCallback(async () => {
     await hapticService.triggerConfirmationHaptic();
-    const notification: Notification = {
-      id: Date.now().toString(),
+    addNotification({
+      id: `accident_${Date.now()}`,
       type: 'accident',
       message: 'Kaza bildirildi. Dikkatli olun.',
       priority: 'high',
       distance: 0,
       timestamp: Date.now(),
-    };
-    setNotifications((prev) => [...prev, notification]);
-    audioService.speakNotification(notification);
+    });
+    audioService.speak('Kaza bildirildi. Dikkatli olun.', 'high');
   }, [audioService, hapticService]);
 
   const dismissNotification = useCallback((id: string) => {
@@ -177,20 +255,30 @@ export const DriveScreen: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // initializeApp() is async and awaits audio/haptics/location setup before any
-    // setState call, so there is no synchronous state update inside this effect.
+    // initializeApp() is async and only calls setState after awaiting audio/
+    // haptics/location setup, so no synchronous state update happens here.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     initializeApp();
     return () => {
       locationService.stopTracking();
       audioService.stop();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isHeadDown]);
+
+  const routeStatus = route
+    ? {
+        destinationName: destination?.name ?? 'Varış',
+        remainingKm: Math.max(0, Math.round(remainingDistance / 100) / 10),
+        remainingMin: Math.max(0, Math.round(remainingTime / 60)),
+      }
+    : null;
 
   const renderSplashScreen = () => (
     <View style={styles.splashContainer}>
@@ -210,10 +298,13 @@ export const DriveScreen: React.FC = () => {
           <Text style={styles.permissionText}>
             Konum izni verilmedi. Sürüş modu başlatılamaz.
           </Text>
-          <TouchableOpacity style={styles.startButton} onPress={() => {
-            setPermissionDenied(false);
-            initializeApp();
-          }}>
+          <TouchableOpacity
+            style={styles.startButton}
+            onPress={() => {
+              setPermissionDenied(false);
+              initializeApp();
+            }}
+          >
             <Text style={styles.startButtonText}>TEKRAR DENE</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.settingsButton} onPress={() => Linking.openSettings()}>
@@ -221,11 +312,18 @@ export const DriveScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
       ) : (
-        <TouchableOpacity style={styles.startButton} onPress={() => setScreenMode('drive')}>
+        <TouchableOpacity style={styles.startButton} onPress={() => setScreenMode('select-destination')}>
           <Text style={styles.startButtonText}>ANLADIĞIM</Text>
         </TouchableOpacity>
       )}
     </View>
+  );
+
+  const renderSelectDestination = () => (
+    <RouteSelectScreen
+      startPosition={{ latitude: region.latitude, longitude: region.longitude }}
+      onReady={handleRouteReady}
+    />
   );
 
   const renderDriveScreen = () => (
@@ -246,6 +344,7 @@ export const DriveScreen: React.FC = () => {
         upcomingTurn={upcomingTurn}
         distanceToTurn={distanceToTurn}
         isHeadDown={isHeadDown}
+        routeStatus={routeStatus}
       />
 
       <View style={styles.bottomControls}>
@@ -273,7 +372,15 @@ export const DriveScreen: React.FC = () => {
     </View>
   );
 
-  return <SafeAreaView style={styles.container}>{screenMode === 'splash' ? renderSplashScreen() : renderDriveScreen()}</SafeAreaView>;
+  return (
+    <SafeAreaView style={styles.container}>
+      {screenMode === 'splash'
+        ? renderSplashScreen()
+        : screenMode === 'select-destination'
+          ? renderSelectDestination()
+          : renderDriveScreen()}
+    </SafeAreaView>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -357,14 +464,6 @@ const styles = StyleSheet.create({
   },
   driveContainer: {
     flex: 1,
-  },
-  map: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    opacity: 0.3,
   },
   bottomControls: {
     position: 'absolute',

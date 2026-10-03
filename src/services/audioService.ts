@@ -67,6 +67,31 @@ export class AudioService {
     this.speak(notification.message, priority);
   }
 
+  speakCurveSpeedAlert(): void {
+    this.speak('Dikkat! Hızınızı azaltın. Keskin viraja çok yakınsınız.', 'high');
+  }
+
+  speakRadarAlert(speedLimit: number): void {
+    this.speak(
+      speedLimit > 0
+        ? `Radar var! Hız sınırı ${speedLimit} kilometre.`
+        : 'Radar bölgesi! Hızınıza dikkat edin.',
+      'high'
+    );
+  }
+
+  speakDestinationApproach(): void {
+    this.speak('Varış noktasına yaklaşıyorsunuz.', 'high');
+  }
+
+  speakArrival(): void {
+    this.speak('Varış noktasına ulaştınız. İyi günler dileriz.', 'high');
+  }
+
+  speakRouteReady(destinationName: string): void {
+    this.speak(`Yola çıkılıyor. Varış: ${destinationName}. İyi yolculuklar.`, 'medium');
+  }
+
   async stop(): Promise<void> {
     if (this.isSpeaking) {
       await Speech.stop();

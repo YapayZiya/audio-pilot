@@ -1,20 +1,31 @@
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
-import { Turn, RoadSegment } from '../models/types';
+import { Turn, RoadSegment, RouteInfo, SpeedCamera } from '../models/types';
 import { OSMService } from './osmService';
 import { CurvatureService } from './curvatureService';
+import { RouteMonitor } from './routeMonitor';
 
-const LOCATION_TASK_NAME = 'background-location-task';
-const GPS_UPDATE_INTERVAL_CITY = 5000;
-const GPS_UPDATE_INTERVAL_HIGHWAY = 10000;
-const DISTANCE_FILTER_CITY = 50;
-const DISTANCE_FILTER_HIGHWAY = 500;
+const GPS_UPDATE_INTERVAL_MS = 1000;
+const CORRIDOR_FETCH_MIN_INTERVAL_MS = 8000;
+const CORRIDOR_FETCH_MIN_MOVEMENT_M = 30;
 
 export interface LocationServiceCallbacks {
   onLocationUpdate: (location: Location.LocationObject) => void;
   onTurnDetected: (turn: Turn) => void;
   onSpeedChange: (speed: number) => void;
   onError: (error: Error) => void;
+  /** Refreshed next-turn for the cockpit display. */
+  onTurnUpdate?: (turn: Turn | null) => void;
+  /** Approaching a sharp curve faster than the recommended speed. */
+  onCurveSpeedAlert?: (turn: Turn) => void;
+  /** A speed camera / enforcement zone is approaching. */
+  onRadarAlert?: (camera: SpeedCamera, distance: number) => void;
+  /** Remaining route distance (m) and ETA (s). */
+  onRouteProgress?: (remainingDistance: number, remainingTime: number) => void;
+  /** Destination within 500m. */
+  onDestinationApproach?: (distance: number) => void;
+  /** Destination reached. */
+  onArrival?: () => void;
 }
 
 export class LocationService {
@@ -24,6 +35,12 @@ export class LocationService {
   private isTracking: boolean = false;
   private subscription: Location.LocationSubscription | null = null;
   private locationTask: string | null = null;
+
+  private monitor: RouteMonitor | null = null;
+  private activeRoute: RouteInfo | null = null;
+
+  private lastCorridorFetchAt = 0;
+  private lastCorridorFetchPos: { latitude: number; longitude: number } | null = null;
 
   async requestPermissions(): Promise<boolean> {
     try {
@@ -54,17 +71,26 @@ export class LocationService {
 
     this.callbacks = callbacks;
 
-    try {
-      const isHighway = this.currentSpeed > 80;
-      const accuracy = Location.Accuracy.BestForNavigation;
-      const distanceInterval = isHighway ? DISTANCE_FILTER_HIGHWAY : DISTANCE_FILTER_CITY;
-      const timeInterval = isHighway ? GPS_UPDATE_INTERVAL_HIGHWAY : GPS_UPDATE_INTERVAL_CITY;
+    this.monitor = new RouteMonitor({
+      onTurnUpdate: (turn) => this.callbacks?.onTurnUpdate?.(turn),
+      onTurnDetected: (turn) => this.callbacks?.onTurnDetected(turn),
+      onCurveSpeedAlert: (turn) => this.callbacks?.onCurveSpeedAlert?.(turn),
+      onRadarAlert: (camera, distance) => this.callbacks?.onRadarAlert?.(camera, distance),
+      onRouteProgress: (remainingDistance, remainingTime) =>
+        this.callbacks?.onRouteProgress?.(remainingDistance, remainingTime),
+      onDestinationApproach: (distance) => this.callbacks?.onDestinationApproach?.(distance),
+      onArrival: () => this.callbacks?.onArrival?.(),
+    });
+    this.monitor.setRoute(this.activeRoute);
 
+    try {
+      // Highest accuracy at the fastest rate the device allows (~1 Hz): the
+      // speedometer must update in real time, never on a 5-10s cycle.
       this.subscription = await Location.watchPositionAsync(
         {
-          accuracy,
-          distanceInterval,
-          timeInterval,
+          accuracy: Location.Accuracy.Highest,
+          timeInterval: GPS_UPDATE_INTERVAL_MS,
+          distanceInterval: 0,
           mayShowUserSettingsDialog: true,
         },
         (location) => this.handleLocationUpdate(location)
@@ -95,14 +121,57 @@ export class LocationService {
     console.log('Location tracking stopped');
   }
 
+  /** Attach (or clear) the active route for live turn/radar/ETA monitoring. */
+  setRoute(route: RouteInfo | null): void {
+    this.activeRoute = route;
+    this.monitor?.setRoute(route);
+    if (route) {
+      // The first tick of the monitor will re-emit the initial state.
+      this.lastCorridorFetchAt = 0;
+      this.lastCorridorFetchPos = null;
+    }
+  }
+
+  getRoute(): RouteInfo | null {
+    return this.activeRoute;
+  }
+
   private async handleLocationUpdate(location: Location.LocationObject): Promise<void> {
     this.lastKnownLocation = location;
-    this.currentSpeed = location.coords.speed || 0;
+
+    // GPS speed can be null at standstill / cold start; keep the last value
+    // instead of blinking back to 0 on every such fix.
+    const speedMs = location.coords.speed;
+    if (typeof speedMs === 'number' && Number.isFinite(speedMs) && speedMs >= 0) {
+      this.currentSpeed = speedMs * 3.6;
+    }
+
     this.callbacks?.onLocationUpdate(location);
     this.callbacks?.onSpeedChange(this.currentSpeed);
 
+    if (this.activeRoute) {
+      // Route-based monitoring is pure local math - run it on every tick.
+      this.monitor?.onTick(location.coords.latitude, location.coords.longitude, this.currentSpeed);
+      return;
+    }
+
+    // No route: fall back to nearby road analysis, throttled so the Overpass
+    // API is not hammered at 1 Hz.
+    const now = Date.now();
+    const last = this.lastCorridorFetchPos;
+    const moved =
+      !last ||
+      CurvatureService.haversineDistance(last.latitude, last.longitude, location.coords.latitude, location.coords.longitude) >=
+        CORRIDOR_FETCH_MIN_MOVEMENT_M;
+    if (now - this.lastCorridorFetchAt < CORRIDOR_FETCH_MIN_INTERVAL_MS || !moved) return;
+    this.lastCorridorFetchAt = now;
+    this.lastCorridorFetchPos = {
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+    };
+
     try {
-      const roadSegments = await OSMService.fetchRoadData(
+      const roadSegments: RoadSegment[] = await OSMService.fetchRoadData(
         location.coords.latitude,
         location.coords.longitude,
         this.currentSpeed > 80 ? 1000 : 500
