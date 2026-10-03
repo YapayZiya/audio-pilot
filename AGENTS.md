@@ -274,7 +274,7 @@ interface CachedRoute {
 - `AUDIO_LANGUAGE`: 'tr-TR'
 - `CACHE_EXPIRY_DAYS`: 7
 - `NOTIFICATION_RADIUS_KM`: 5
-- `MAP_TILE_URL`: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+- `MAP_TILE_URL`: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'
 - `LOCATION_TASK_NAME`: 'background-location-task'
 - `BACKGROUND_FETCH_TASK`: 'background-fetch-task'
 - `NOMINATIM_SEARCH_URL`: 'https://nominatim.openstreetmap.org/search'
