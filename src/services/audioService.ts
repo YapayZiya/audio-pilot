@@ -2,14 +2,26 @@ import * as Speech from 'expo-speech';
 import { setAudioModeAsync } from 'expo-audio';
 import { Turn, Notification } from '../models/types';
 
+let cachedTurkishVoice: string | undefined;
+
+async function resolveTurkishVoice(): Promise<string | undefined> {
+  if (cachedTurkishVoice) return cachedTurkishVoice;
+  try {
+    const voices = await Speech.getAvailableVoicesAsync();
+    const tr = voices.find((v) => /^tr(-|$)/i.test(v.identifier) || /turkish/i.test(v.name));
+    if (tr) cachedTurkishVoice = tr.identifier;
+  } catch {
+    // ignore voice discovery errors
+  }
+  return cachedTurkishVoice;
+}
+
 export class AudioService {
   private isSpeaking: boolean = false;
   private duckingLevel: number = 0.3;
 
   async initialize(): Promise<void> {
     try {
-      // expo-audio replaces expo-av. Ducking is requested through
-      // `interruptionMode` on both platforms (no separate shouldDuckAndroid flag).
       await setAudioModeAsync({
         playsInSilentMode: true,
         shouldPlayInBackground: true,
@@ -33,11 +45,13 @@ export class AudioService {
       const pitch = priority === 'high' ? 1.1 : 1.0;
       const rate = priority === 'high' ? 0.85 : 0.9;
       const volume = priority === 'high' ? 1.0 : 0.9;
+      const voice = await resolveTurkishVoice();
 
       this.isSpeaking = true;
 
       await Speech.speak(text, {
-        language: 'tr-TR',
+        language: 'tr',
+        voice,
         pitch,
         rate,
         volume,

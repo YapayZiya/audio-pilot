@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -26,13 +26,19 @@ export const RouteSelectScreen: React.FC<RouteSelectScreenProps> = ({ startPosit
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
 
-  const search = useCallback(async () => {
-    const q = query.trim();
-    if (q.length < 2 || searching) return;
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const runSearch = useCallback(async (q: string) => {
+    const trimmed = q.trim();
+    if (trimmed.length < 2) {
+      setResults([]);
+      setSearchError(null);
+      return;
+    }
     setSearching(true);
     setSearchError(null);
     try {
-      const found = await RouteService.searchDestinations(q);
+      const found = await RouteService.searchDestinations(trimmed, 15);
       setResults(found);
       if (found.length === 0) setSearchError('Sonuç bulunamadı.');
     } catch (error) {
@@ -41,7 +47,17 @@ export const RouteSelectScreen: React.FC<RouteSelectScreenProps> = ({ startPosit
     } finally {
       setSearching(false);
     }
-  }, [query, searching]);
+  }, []);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      runSearch(query);
+    }, 350);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [query, runSearch]);
 
   const selectDestination = (destination: Destination) => {
     setSelected(destination);
@@ -97,10 +113,10 @@ export const RouteSelectScreen: React.FC<RouteSelectScreenProps> = ({ startPosit
             value={query}
             onChangeText={setQuery}
             returnKeyType="search"
-            onSubmitEditing={search}
+            onSubmitEditing={() => runSearch(query)}
             autoCorrect={false}
           />
-          <TouchableOpacity style={styles.searchButton} onPress={search} disabled={searching}>
+          <TouchableOpacity style={styles.searchButton} onPress={() => runSearch(query)} disabled={searching}>
             {searching ? <ActivityIndicator color="#FFF" size="small" /> : <Text style={styles.searchButtonText}>ARA</Text>}
           </TouchableOpacity>
         </View>
