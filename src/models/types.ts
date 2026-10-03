@@ -36,6 +36,16 @@ export interface SpeedCamera {
   routeDistanceAt: number;
 }
 
+export interface SpeedLimit {
+  id: string;
+  latitude: number;
+  longitude: number;
+  /** Speed limit in km/h (0 if unknown). */
+  speedLimit: number;
+  /** Meters from the route start. */
+  routeDistanceAt: number;
+}
+
 export interface RouteInfo {
   id: string;
   destination: Destination;
@@ -47,6 +57,8 @@ export interface RouteInfo {
   /** Precomputed curves; `distance`/`routeDistanceAt` are meters from route start. */
   turns: Turn[];
   speedCameras: SpeedCamera[];
+  /** Speed limit signs along the route, meters from route start. */
+  speedLimits: SpeedLimit[];
   fetchedAt: number;
 }
 

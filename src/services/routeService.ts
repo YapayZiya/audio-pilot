@@ -5,6 +5,7 @@ import {
   RouteInfo,
   RoutePoint,
   SpeedCamera,
+  SpeedLimit,
   Turn,
   TURN_DETECTION_THRESHOLD,
 } from '../models/types';
@@ -326,6 +327,67 @@ export function mapOverpassCameras(
   return cameras;
 }
 
+/** Maps raw Overpass elements to speed-limit signs positioned along the route. */
+export function mapOverpassSpeedLimits(
+  elements: OverpassElement[],
+  coords: RoutePoint[],
+  cumulative: number[],
+  maxOffRouteMeters = 120
+): SpeedLimit[] {
+  const limits: SpeedLimit[] = [];
+  const seen = new Set<string>();
+  if (coords.length < 2) return limits;
+
+  for (const el of elements) {
+    const lat = el.lat ?? el.center?.lat;
+    const lon = el.lon ?? el.center?.lon;
+    if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    const tags = el.tags ?? {};
+    const raw = tags['max_speed'] ?? tags['maxspeed'] ?? '';
+    const value = raw.split(/[;,\s]/)[0] ?? '';
+    const limit = parseInt(value, 10);
+    if (!Number.isFinite(limit) || limit <= 0) continue;
+
+    let bestD = Infinity;
+    let bestIdx = 0;
+    for (let i = 0; i < coords.length; i += 2) {
+      const d = haversineDistance(lat, lon, coords[i].latitude, coords[i].longitude);
+      if (d < bestD) {
+        bestD = d;
+        bestIdx = i;
+      }
+    }
+    if (bestD > maxOffRouteMeters) continue;
+
+    const id = `limit_${el.type}_${el.id}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    limits.push({
+      id,
+      latitude: lat,
+      longitude: lon,
+      speedLimit: limit,
+      routeDistanceAt: Math.round(cumulative[bestIdx] ?? 0),
+    });
+  }
+
+  return limits.sort((a, b) => a.routeDistanceAt - b.routeDistanceAt);
+}
+
+export function buildSpeedLimitOverpassQuery(bounds: CameraBounds): string {
+  const bbox = `${bounds.minLat.toFixed(5)},${bounds.minLon.toFixed(5)},${bounds.maxLat.toFixed(5)},${bounds.maxLon.toFixed(5)}`;
+  return [
+    '[out:json][timeout:25];',
+    '(',
+    `node["traffic_sign"~"^(max_speed|speed_controlled)$"]["max_speed"](${bbox});`,
+    `node["traffic_sign"~"^(max_speed|speed_controlled)$"]["maxspeed"](${bbox});`,
+    ');',
+    'out tags 500;',
+  ].join('\n');
+}
+
 export function buildCameraOverpassQuery(bounds: CameraBounds): string {
   const bbox = `${bounds.minLat.toFixed(5)},${bounds.minLon.toFixed(5)},${bounds.maxLat.toFixed(5)},${bounds.maxLon.toFixed(5)}`;
   return [
@@ -391,6 +453,28 @@ export class RouteService {
     }
   }
 
+  static async fetchSpeedLimits(route: RouteInfo): Promise<SpeedLimit[]> {
+    try {
+      const cumulative = computeCumulativeDistances(route.coordinates);
+      const bounds = routeBoundingBox(route.coordinates);
+      if (bounds.minLat === 0 && bounds.minLon === 0 && bounds.maxLat === 0 && bounds.maxLon === 0) return [];
+      const query = buildSpeedLimitOverpassQuery(bounds);
+      const res = await fetch(OVERPASS_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': OSM_API_USER_AGENT,
+        },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+      if (!res.ok) return [];
+      const data = (await res.json()) as { elements?: OverpassElement[] };
+      return mapOverpassSpeedLimits(data.elements ?? [], route.coordinates, cumulative);
+    } catch {
+      return [];
+    }
+  }
+
   static async fetchRoute(start: RoutePoint, destination: Destination): Promise<RouteInfo> {
     const url = `${OSRM_ROUTE_URL}/${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&alternatives=false`;
     const res = await fetch(url, { headers: { 'User-Agent': OSM_API_USER_AGENT } });
@@ -419,10 +503,12 @@ export class RouteService {
       totalDuration: Math.round(route.duration),
       turns: computeRouteTurns(coordinates),
       speedCameras: [],
+      speedLimits: [],
       fetchedAt: Date.now(),
     };
 
     info.speedCameras = await RouteService.fetchSpeedCameras(info);
+    info.speedLimits = await RouteService.fetchSpeedLimits(info);
     return info;
   }
 }

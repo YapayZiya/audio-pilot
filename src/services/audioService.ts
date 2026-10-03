@@ -1,6 +1,6 @@
 import * as Speech from 'expo-speech';
 import { setAudioModeAsync } from 'expo-audio';
-import { Turn, Notification } from '../models/types';
+import { Turn, Notification, SpeedLimit } from '../models/types';
 
 let cachedTurkishVoice: string | undefined;
 
@@ -14,6 +14,13 @@ async function resolveTurkishVoice(): Promise<string | undefined> {
     // ignore voice discovery errors
   }
   return cachedTurkishVoice;
+}
+
+function ttsOptions(priority: 'low' | 'medium' | 'high' = 'medium') {
+  const pitch = priority === 'high' ? 1.05 : 0.95;
+  const rate = priority === 'high' ? 0.82 : 0.88;
+  const volume = priority === 'high' ? 1.0 : 0.95;
+  return { pitch, rate, volume };
 }
 
 export class AudioService {
@@ -42,10 +49,8 @@ export class AudioService {
     }
 
     try {
-      const pitch = priority === 'high' ? 1.1 : 1.0;
-      const rate = priority === 'high' ? 0.85 : 0.9;
-      const volume = priority === 'high' ? 1.0 : 0.9;
       const voice = await resolveTurkishVoice();
+      const { pitch, rate, volume } = ttsOptions(priority);
 
       this.isSpeaking = true;
 
@@ -92,6 +97,10 @@ export class AudioService {
         : 'Radar bölgesi! Hızınıza dikkat edin.',
       'high'
     );
+  }
+
+  speakSpeedAlert(limit: number, currentSpeed: number): void {
+    this.speak(`Hız sınırını aştınız. Sınır ${limit} kilometre. Mevcut hız ${Math.round(currentSpeed)}.`, 'high');
   }
 
   speakDestinationApproach(): void {

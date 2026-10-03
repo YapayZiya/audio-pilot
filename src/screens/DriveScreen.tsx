@@ -16,7 +16,7 @@ import * as KeepAwake from 'expo-keep-awake';
 import { AudioService } from '../services/audioService';
 import { HapticService } from '../services/hapticService';
 import { LocationService, LocationServiceCallbacks } from '../services/locationService';
-import { Destination, Notification, RouteInfo, SpeedCamera, Turn } from '../models/types';
+import { Destination, Notification, RouteInfo, SpeedCamera, SpeedLimit, Turn } from '../models/types';
 import { MinimalCockpit } from '../components/MinimalCockpit';
 import { OsmMapBackground } from '../components/OsmMapBackground';
 import { RouteSelectScreen } from './RouteSelectScreen';
@@ -118,6 +118,26 @@ export const DriveScreen: React.FC = () => {
     });
   };
 
+  const handleSpeedAlert = (limit: SpeedLimit, currentSpeed: number) => {
+    hapticService.triggerNotificationHaptic({
+      id: `speed_alert_${limit.id}`,
+      type: 'speed',
+      message: '',
+      priority: 'high',
+      distance: 0,
+      timestamp: Date.now(),
+    });
+    audioService.speakSpeedAlert(limit.speedLimit, currentSpeed);
+    addNotification({
+      id: `speed_${limit.id}_${Date.now()}`,
+      type: 'speed',
+      message: `Hız sınırını aştınız! Sınır: ${limit.speedLimit} km/s`,
+      priority: 'high',
+      distance: limit.routeDistanceAt,
+      timestamp: Date.now(),
+    });
+  };
+
   const handleDestinationApproach = (distance: number) => {
     audioService.speakDestinationApproach();
     addNotification({
@@ -168,6 +188,7 @@ export const DriveScreen: React.FC = () => {
         onTurnUpdate: handleTurnUpdate,
         onCurveSpeedAlert: handleCurveSpeedAlert,
         onRadarAlert: handleRadarAlert,
+        onSpeedAlert: handleSpeedAlert,
         onRouteProgress: (remainingDist, remainingSec) => {
           setRemainingDistance(remainingDist);
           setRemainingTime(remainingSec);

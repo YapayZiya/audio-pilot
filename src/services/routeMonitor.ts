@@ -1,9 +1,11 @@
-import { LOOKAHEAD_DISTANCE, RouteInfo, SpeedCamera, Turn } from '../models/types';
+import { LOOKAHEAD_DISTANCE, RouteInfo, SpeedCamera, SpeedLimit, Turn } from '../models/types';
 import {
   CURVE_SPEED_ALERT_DISTANCE,
   DESTINATION_APPROACH_DISTANCE,
   RADAR_NEAR_WARNING_DISTANCE,
   RADAR_WARNING_DISTANCE,
+  SPEED_ALERT_OVER_LIMIT,
+  SPEED_LIMIT_LOOKAHEAD,
 } from '../utils/constants';
 import {
   computeCumulativeDistances,
@@ -20,6 +22,8 @@ export interface RouteEvents {
   onCurveSpeedAlert?: (turn: Turn) => void;
   /** A speed camera / enforcement zone is approaching. */
   onRadarAlert?: (camera: SpeedCamera, distance: number) => void;
+  /** Current speed exceeds the upcoming route speed limit. */
+  onSpeedAlert?: (limit: SpeedLimit, currentSpeed: number) => void;
   /** Periodic remaining distance / ETA update. */
   onRouteProgress?: (remainingDistance: number, remainingTime: number) => void;
   /** The destination is within DESTINATION_APPROACH_DISTANCE. */
@@ -38,6 +42,7 @@ export class RouteMonitor {
   private announcedTurns = new Set<string>();
   private curveAlerted = new Set<string>();
   private radarAlertLevel = new Map<string, 0 | 1 | 2>();
+  private speedAlerted = new Set<string>();
   private destinationAnnounced = false;
   private arrived = false;
   private lastProgressEmit = 0;
@@ -53,6 +58,7 @@ export class RouteMonitor {
     this.announcedTurns.clear();
     this.curveAlerted.clear();
     this.radarAlertLevel.clear();
+    this.speedAlerted.clear();
     this.destinationAnnounced = false;
     this.arrived = false;
     this.events.onTurnUpdate?.(null);
@@ -78,6 +84,7 @@ export class RouteMonitor {
 
     this.handleTurns(progress, speedKmh);
     this.handleRadar(progress);
+    this.handleSpeed(progress, speedKmh);
     this.handleDestination(progress);
   }
 
@@ -145,6 +152,24 @@ export class RouteMonitor {
       this.radarAlertLevel.set(nearest.camera.id, level);
       this.events.onRadarAlert?.(nearest.camera, nearest.live);
     }
+  }
+
+  private handleSpeed(progress: RouteProgress, speedKmh: number): void {
+    const route = this.route;
+    if (!route || route.speedLimits.length === 0 || speedKmh <= 0) return;
+
+    const upcoming = route.speedLimits
+      .map((l) => ({ l, live: l.routeDistanceAt - progress.distanceFromStart }))
+      .filter(({ live }) => live > 0 && live <= SPEED_LIMIT_LOOKAHEAD)
+      .sort((a, b) => a.live - b.live)[0];
+
+    if (!upcoming) return;
+    if (upcoming.l.speedLimit <= 0) return;
+    if (speedKmh < upcoming.l.speedLimit + SPEED_ALERT_OVER_LIMIT) return;
+    if (this.speedAlerted.has(upcoming.l.id)) return;
+
+    this.speedAlerted.add(upcoming.l.id);
+    this.events.onSpeedAlert?.(upcoming.l, speedKmh);
   }
 
   private handleDestination(progress: RouteProgress): void {

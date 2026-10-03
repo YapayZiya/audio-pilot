@@ -1,5 +1,5 @@
 import { RouteMonitor } from '../routeMonitor';
-import { RouteInfo, SpeedCamera, Turn } from '../../models/types';
+import { RouteInfo, SpeedCamera, SpeedLimit, Turn } from '../../models/types';
 
 const BASE_LAT = 41.0;
 const BASE_LON = 29.0;
@@ -18,6 +18,7 @@ function buildRoute(turns: Turn[], cameras: SpeedCamera[] = [], totalDistance = 
     totalDuration,
     turns,
     speedCameras: cameras,
+    speedLimits: [],
     fetchedAt: Date.now(),
   };
 }
